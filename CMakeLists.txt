@@ -87,6 +87,23 @@ add_library(finevk-core
     src/core/debug.cpp
     src/core/logging.cpp
 
+    # Layer 2: Device & Memory Management
+    src/device/physical_device.cpp
+    src/device/logical_device.cpp
+    src/device/memory.cpp
+    src/device/buffer.cpp
+    src/device/image.cpp
+    src/device/sampler.cpp
+    src/device/command.cpp
+
+    # Layer 3: Rendering Infrastructure
+    src/rendering/swapchain.cpp
+    src/rendering/renderpass.cpp
+    src/rendering/framebuffer.cpp
+    src/rendering/pipeline.cpp
+    src/rendering/sync.cpp
+    src/rendering/descriptors.cpp
+
     # Platform
     src/platform/glfw_surface.cpp
 )

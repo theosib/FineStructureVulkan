@@ -42,6 +42,7 @@ using ImageViewPtr = std::unique_ptr<ImageView>;
 using SwapChainPtr = std::unique_ptr<SwapChain>;
 using RenderPassPtr = std::unique_ptr<RenderPass>;
 using PipelinePtr = std::unique_ptr<GraphicsPipeline>;
+using GraphicsPipelinePtr = std::unique_ptr<GraphicsPipeline>;
 using PipelineLayoutPtr = std::unique_ptr<PipelineLayout>;
 using ShaderModulePtr = std::unique_ptr<ShaderModule>;
 using FramebufferPtr = std::unique_ptr<Framebuffer>;

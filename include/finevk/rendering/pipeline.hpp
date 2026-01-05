@@ -1,0 +1,250 @@
+#pragma once
+
+#include "finevk/core/types.hpp"
+
+#include <vulkan/vulkan.h>
+#include <vector>
+#include <memory>
+#include <string>
+
+namespace finevk {
+
+class LogicalDevice;
+class RenderPass;
+
+/**
+ * @brief Vulkan shader module wrapper
+ */
+class ShaderModule {
+public:
+    /// Create from SPIR-V binary data
+    static ShaderModulePtr fromSPIRV(LogicalDevice* device,
+                                     const std::vector<uint32_t>& spirv);
+
+    /// Create from SPIR-V file
+    static ShaderModulePtr fromFile(LogicalDevice* device,
+                                    const std::string& path);
+
+    /// Get the Vulkan shader module handle
+    VkShaderModule handle() const { return module_; }
+
+    /// Get the owning device
+    LogicalDevice* device() const { return device_; }
+
+    /// Destructor
+    ~ShaderModule();
+
+    // Non-copyable
+    ShaderModule(const ShaderModule&) = delete;
+    ShaderModule& operator=(const ShaderModule&) = delete;
+
+    // Movable
+    ShaderModule(ShaderModule&& other) noexcept;
+    ShaderModule& operator=(ShaderModule&& other) noexcept;
+
+private:
+    ShaderModule() = default;
+
+    void cleanup();
+
+    LogicalDevice* device_ = nullptr;
+    VkShaderModule module_ = VK_NULL_HANDLE;
+};
+
+/**
+ * @brief Vulkan pipeline layout wrapper
+ */
+class PipelineLayout {
+public:
+    /**
+     * @brief Builder for creating PipelineLayout objects
+     */
+    class Builder {
+    public:
+        explicit Builder(LogicalDevice* device);
+
+        /// Add a descriptor set layout
+        Builder& addDescriptorSetLayout(VkDescriptorSetLayout layout);
+
+        /// Add a push constant range
+        Builder& addPushConstantRange(VkShaderStageFlags stages,
+                                      uint32_t offset, uint32_t size);
+
+        /// Build the pipeline layout
+        PipelineLayoutPtr build();
+
+    private:
+        LogicalDevice* device_;
+        std::vector<VkDescriptorSetLayout> setLayouts_;
+        std::vector<VkPushConstantRange> pushConstantRanges_;
+    };
+
+    /// Create a builder for a pipeline layout
+    static Builder create(LogicalDevice* device);
+
+    /// Get the Vulkan pipeline layout handle
+    VkPipelineLayout handle() const { return layout_; }
+
+    /// Get the owning device
+    LogicalDevice* device() const { return device_; }
+
+    /// Destructor
+    ~PipelineLayout();
+
+    // Non-copyable
+    PipelineLayout(const PipelineLayout&) = delete;
+    PipelineLayout& operator=(const PipelineLayout&) = delete;
+
+    // Movable
+    PipelineLayout(PipelineLayout&& other) noexcept;
+    PipelineLayout& operator=(PipelineLayout&& other) noexcept;
+
+private:
+    friend class Builder;
+    PipelineLayout() = default;
+
+    void cleanup();
+
+    LogicalDevice* device_ = nullptr;
+    VkPipelineLayout layout_ = VK_NULL_HANDLE;
+};
+
+/**
+ * @brief Vulkan graphics pipeline wrapper
+ */
+class GraphicsPipeline {
+public:
+    /**
+     * @brief Builder for creating GraphicsPipeline objects
+     */
+    class Builder {
+    public:
+        Builder(LogicalDevice* device, RenderPass* renderPass, PipelineLayout* layout);
+
+        // Shader stages
+        Builder& vertexShader(ShaderModule* module, const char* entryPoint = "main");
+        Builder& fragmentShader(ShaderModule* module, const char* entryPoint = "main");
+
+        // Vertex input
+        Builder& vertexBinding(uint32_t binding, uint32_t stride,
+                               VkVertexInputRate inputRate = VK_VERTEX_INPUT_RATE_VERTEX);
+        Builder& vertexAttribute(uint32_t location, uint32_t binding,
+                                 VkFormat format, uint32_t offset);
+
+        // Input assembly
+        Builder& topology(VkPrimitiveTopology topology);
+        Builder& primitiveRestart(bool enable);
+
+        // Rasterization
+        Builder& polygonMode(VkPolygonMode mode);
+        Builder& cullMode(VkCullModeFlags mode);
+        Builder& frontFace(VkFrontFace face);
+        Builder& lineWidth(float width);
+        Builder& depthBias(float constantFactor, float clamp, float slopeFactor);
+
+        // Multisampling
+        Builder& samples(VkSampleCountFlagBits count);
+        Builder& sampleShading(float minSampleShading);
+
+        // Depth/stencil
+        Builder& depthTest(bool enable);
+        Builder& depthWrite(bool enable);
+        Builder& depthCompareOp(VkCompareOp op);
+        Builder& depthBoundsTest(bool enable, float min, float max);
+
+        // Blending
+        Builder& blending(bool enable);
+        Builder& blendMode(VkBlendFactor srcColor, VkBlendFactor dstColor,
+                           VkBlendOp colorOp,
+                           VkBlendFactor srcAlpha, VkBlendFactor dstAlpha,
+                           VkBlendOp alphaOp);
+
+        // Dynamic state
+        Builder& dynamicState(VkDynamicState state);
+        Builder& dynamicViewportAndScissor();
+
+        // Subpass
+        Builder& subpass(uint32_t index);
+
+        /// Build the graphics pipeline
+        GraphicsPipelinePtr build();
+
+    private:
+        LogicalDevice* device_;
+        RenderPass* renderPass_;
+        PipelineLayout* layout_;
+
+        // Shader stages
+        std::vector<VkPipelineShaderStageCreateInfo> shaderStages_;
+
+        // Vertex input
+        std::vector<VkVertexInputBindingDescription> vertexBindings_;
+        std::vector<VkVertexInputAttributeDescription> vertexAttributes_;
+
+        // Fixed function state
+        VkPrimitiveTopology topology_ = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        bool primitiveRestart_ = false;
+
+        VkPolygonMode polygonMode_ = VK_POLYGON_MODE_FILL;
+        VkCullModeFlags cullMode_ = VK_CULL_MODE_BACK_BIT;
+        VkFrontFace frontFace_ = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        float lineWidth_ = 1.0f;
+        bool depthBiasEnable_ = false;
+        float depthBiasConstant_ = 0.0f;
+        float depthBiasClamp_ = 0.0f;
+        float depthBiasSlope_ = 0.0f;
+
+        VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
+        bool sampleShadingEnable_ = false;
+        float minSampleShading_ = 1.0f;
+
+        bool depthTestEnable_ = false;
+        bool depthWriteEnable_ = false;
+        VkCompareOp depthCompareOp_ = VK_COMPARE_OP_LESS;
+        bool depthBoundsTestEnable_ = false;
+        float depthBoundsMin_ = 0.0f;
+        float depthBoundsMax_ = 1.0f;
+
+        bool blendEnable_ = false;
+        VkBlendFactor srcColorBlendFactor_ = VK_BLEND_FACTOR_SRC_ALPHA;
+        VkBlendFactor dstColorBlendFactor_ = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        VkBlendOp colorBlendOp_ = VK_BLEND_OP_ADD;
+        VkBlendFactor srcAlphaBlendFactor_ = VK_BLEND_FACTOR_ONE;
+        VkBlendFactor dstAlphaBlendFactor_ = VK_BLEND_FACTOR_ZERO;
+        VkBlendOp alphaBlendOp_ = VK_BLEND_OP_ADD;
+
+        std::vector<VkDynamicState> dynamicStates_;
+        uint32_t subpass_ = 0;
+    };
+
+    /// Create a builder for a graphics pipeline
+    static Builder create(LogicalDevice* device, RenderPass* renderPass, PipelineLayout* layout);
+
+    /// Get the Vulkan pipeline handle
+    VkPipeline handle() const { return pipeline_; }
+
+    /// Get the owning device
+    LogicalDevice* device() const { return device_; }
+
+    /// Destructor
+    ~GraphicsPipeline();
+
+    // Non-copyable
+    GraphicsPipeline(const GraphicsPipeline&) = delete;
+    GraphicsPipeline& operator=(const GraphicsPipeline&) = delete;
+
+    // Movable
+    GraphicsPipeline(GraphicsPipeline&& other) noexcept;
+    GraphicsPipeline& operator=(GraphicsPipeline&& other) noexcept;
+
+private:
+    friend class Builder;
+    GraphicsPipeline() = default;
+
+    void cleanup();
+
+    LogicalDevice* device_ = nullptr;
+    VkPipeline pipeline_ = VK_NULL_HANDLE;
+};
+
+} // namespace finevk
