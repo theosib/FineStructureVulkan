@@ -1,0 +1,16 @@
+{
+    "cmake.configureArgs": [
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "files.associations": {
+        "*.hpp": "cpp",
+        "*.h": "cpp",
+        "*.cpp": "cpp",
+        "*.vert": "glsl",
+        "*.frag": "glsl",
+        "*.comp": "glsl"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+}

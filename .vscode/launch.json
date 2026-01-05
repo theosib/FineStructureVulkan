@@ -1,0 +1,55 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug test_phase1",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/test_phase1",
+            "args": [],
+            "cwd": "${workspaceFolder}/build",
+            "environment": [
+                {
+                    "name": "DYLD_LIBRARY_PATH",
+                    "value": "${env:VULKAN_SDK}/lib"
+                },
+                {
+                    "name": "VK_ICD_FILENAMES",
+                    "value": "${env:VULKAN_SDK}/share/vulkan/icd.d/MoltenVK_icd.json"
+                },
+                {
+                    "name": "VK_LAYER_PATH",
+                    "value": "${env:VULKAN_SDK}/share/vulkan/explicit_layer.d"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "CMake: build"
+        },
+        {
+            "name": "Debug hello_triangle",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/hello_triangle/hello_triangle",
+            "args": [],
+            "cwd": "${workspaceFolder}/build",
+            "environment": [
+                {
+                    "name": "DYLD_LIBRARY_PATH",
+                    "value": "${env:VULKAN_SDK}/lib"
+                },
+                {
+                    "name": "VK_ICD_FILENAMES",
+                    "value": "${env:VULKAN_SDK}/share/vulkan/icd.d/MoltenVK_icd.json"
+                },
+                {
+                    "name": "VK_LAYER_PATH",
+                    "value": "${env:VULKAN_SDK}/share/vulkan/explicit_layer.d"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "CMake: build"
+        }
+    ]
+}

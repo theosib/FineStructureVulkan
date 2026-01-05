@@ -1,0 +1,37 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled shaders
+*.spv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+*.exe
+
+# Debug files
+*.dSYM/
+*.pdb
+
+# Logs
+*.log
+
+# Dependencies (if using local copies)
+external/
+third_party/
