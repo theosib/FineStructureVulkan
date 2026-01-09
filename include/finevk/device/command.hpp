@@ -12,6 +12,8 @@ class LogicalDevice;
 class Queue;
 class Buffer;
 class Image;
+class GraphicsPipeline;
+class PipelineLayout;
 
 /**
  * @brief Command pool flags
@@ -100,13 +102,44 @@ public:
     // Pipeline binding
     void bindPipeline(VkPipelineBindPoint bindPoint, VkPipeline pipeline);
 
-    // Descriptor set binding
+    /// Bind a graphics pipeline (accepts reference, pointer, or smart pointer)
+    void bindPipeline(GraphicsPipeline& pipeline);
+    void bindPipeline(GraphicsPipeline* pipeline) { bindPipeline(*pipeline); }
+    template<typename T>
+    void bindPipeline(const std::unique_ptr<T>& pipeline) { bindPipeline(*pipeline); }
+
+    // Descriptor set binding (raw Vulkan)
     void bindDescriptorSets(
         VkPipelineBindPoint bindPoint,
         VkPipelineLayout layout,
         uint32_t firstSet,
         const std::vector<VkDescriptorSet>& sets,
         const std::vector<uint32_t>& dynamicOffsets = {});
+
+    /// Bind descriptor sets for graphics (accepts reference, pointer, or smart pointer)
+    void bindDescriptorSets(
+        PipelineLayout& layout,
+        uint32_t firstSet,
+        const std::vector<VkDescriptorSet>& sets);
+    void bindDescriptorSets(
+        PipelineLayout* layout,
+        uint32_t firstSet,
+        const std::vector<VkDescriptorSet>& sets) { bindDescriptorSets(*layout, firstSet, sets); }
+    template<typename T>
+    void bindDescriptorSets(
+        const std::unique_ptr<T>& layout,
+        uint32_t firstSet,
+        const std::vector<VkDescriptorSet>& sets) { bindDescriptorSets(*layout, firstSet, sets); }
+
+    /// Bind a single descriptor set for graphics (accepts reference, pointer, or smart pointer)
+    void bindDescriptorSet(PipelineLayout& layout, VkDescriptorSet set, uint32_t setIndex = 0);
+    void bindDescriptorSet(PipelineLayout* layout, VkDescriptorSet set, uint32_t setIndex = 0) {
+        bindDescriptorSet(*layout, set, setIndex);
+    }
+    template<typename T>
+    void bindDescriptorSet(const std::unique_ptr<T>& layout, VkDescriptorSet set, uint32_t setIndex = 0) {
+        bindDescriptorSet(*layout, set, setIndex);
+    }
 
     // Vertex/index binding
     void bindVertexBuffer(Buffer& buffer, VkDeviceSize offset = 0);

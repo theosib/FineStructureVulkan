@@ -2,6 +2,7 @@
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/image.hpp"
+#include "finevk/rendering/pipeline.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <stdexcept>
@@ -164,6 +165,10 @@ void CommandBuffer::bindPipeline(VkPipelineBindPoint bindPoint, VkPipeline pipel
     vkCmdBindPipeline(buffer_, bindPoint, pipeline);
 }
 
+void CommandBuffer::bindPipeline(GraphicsPipeline& pipeline) {
+    vkCmdBindPipeline(buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+}
+
 void CommandBuffer::bindDescriptorSets(
     VkPipelineBindPoint bindPoint,
     VkPipelineLayout layout,
@@ -176,6 +181,22 @@ void CommandBuffer::bindDescriptorSets(
         static_cast<uint32_t>(sets.size()), sets.data(),
         static_cast<uint32_t>(dynamicOffsets.size()),
         dynamicOffsets.empty() ? nullptr : dynamicOffsets.data());
+}
+
+void CommandBuffer::bindDescriptorSets(
+    PipelineLayout& layout,
+    uint32_t firstSet,
+    const std::vector<VkDescriptorSet>& sets) {
+
+    vkCmdBindDescriptorSets(
+        buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.handle(), firstSet,
+        static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
+}
+
+void CommandBuffer::bindDescriptorSet(PipelineLayout& layout, VkDescriptorSet set, uint32_t setIndex) {
+    vkCmdBindDescriptorSets(
+        buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.handle(),
+        setIndex, 1, &set, 0, nullptr);
 }
 
 void CommandBuffer::bindVertexBuffer(Buffer& buffer, VkDeviceSize offset) {

@@ -583,6 +583,48 @@ void test_simple_renderer_default_sampler() {
     std::cout << "PASSED\n";
 }
 
+void test_simple_renderer_msaa() {
+    std::cout << "Test: SimpleRenderer - MSAA support... ";
+
+    // Test with MSAA disabled (default)
+    {
+        RendererConfig config{};
+        config.msaa = MSAALevel::Off;
+        config.enableDepthBuffer = true;
+
+        auto renderer = SimpleRenderer::create(
+            ctx.instance.get(),
+            ctx.surface.get(),
+            config);
+
+        assert(renderer->msaaSamples() == VK_SAMPLE_COUNT_1_BIT);
+        assert(renderer->isMsaaEnabled() == false);
+    }
+
+    // Test with MSAA enabled (4x)
+    cleanup_test_context();
+    setup_test_context();
+    {
+        RendererConfig config{};
+        config.msaa = MSAALevel::Medium;  // 4x MSAA
+        config.enableDepthBuffer = true;
+
+        auto renderer = SimpleRenderer::create(
+            ctx.instance.get(),
+            ctx.surface.get(),
+            config);
+
+        // Should be at least 1x (will be 4x if supported)
+        assert(renderer->msaaSamples() >= VK_SAMPLE_COUNT_1_BIT);
+        // If GPU supports 4x MSAA, should be enabled
+        if (renderer->msaaSamples() == VK_SAMPLE_COUNT_4_BIT) {
+            assert(renderer->isMsaaEnabled() == true);
+        }
+    }
+
+    std::cout << "PASSED\n";
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -651,6 +693,10 @@ int main() {
         cleanup_test_context();
         setup_test_context();
         test_simple_renderer_default_sampler(); passed++;
+
+        cleanup_test_context();
+        setup_test_context();
+        test_simple_renderer_msaa(); passed++;
 
         cleanup_test_context();
 

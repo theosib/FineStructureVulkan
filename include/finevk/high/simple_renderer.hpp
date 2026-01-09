@@ -1,6 +1,7 @@
 #pragma once
 
 #include "finevk/core/types.hpp"
+#include "finevk/device/physical_device.hpp"
 #include "finevk/high/mesh.hpp"
 #include "finevk/high/uniform_buffer.hpp"
 
@@ -15,7 +16,6 @@ namespace finevk {
 
 class Instance;
 class Surface;
-class PhysicalDevice;
 class LogicalDevice;
 class SwapChain;
 class RenderPass;
@@ -30,6 +30,20 @@ class Sampler;
 class Texture;
 
 /**
+ * @brief MSAA quality level for easy configuration
+ *
+ * Higher levels provide smoother edges but require more GPU resources.
+ * The actual sample count is clamped to what the GPU supports.
+ */
+enum class MSAALevel {
+    Off = 1,      // No multisampling (fastest)
+    Low = 2,      // 2x MSAA - minimal quality improvement
+    Medium = 4,   // 4x MSAA - good balance (recommended)
+    High = 8,     // 8x MSAA - high quality
+    Ultra = 16    // 16x MSAA - maximum quality (rarely needed)
+};
+
+/**
  * @brief Configuration for SimpleRenderer
  */
 struct RendererConfig {
@@ -39,7 +53,7 @@ struct RendererConfig {
     bool vsync = true;
     bool enableValidation = true;
     bool enableDepthBuffer = true;
-    VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+    MSAALevel msaa = MSAALevel::Off;  // Default: no MSAA for maximum compatibility
 };
 
 /**
@@ -78,7 +92,7 @@ public:
     LogicalDevice* device() const { return device_.get(); }
 
     /// Get the physical device
-    PhysicalDevice* physicalDevice() const { return physicalDevice_; }
+    const PhysicalDevice* physicalDevice() const { return &physicalDevice_; }
 
     /// Get the swap chain
     SwapChain* swapChain() const { return swapChain_.get(); }
@@ -103,6 +117,12 @@ public:
 
     /// Get depth format (VK_FORMAT_UNDEFINED if no depth)
     VkFormat depthFormat() const { return depthFormat_; }
+
+    /// Get actual MSAA sample count being used
+    VkSampleCountFlagBits msaaSamples() const { return msaaSamples_; }
+
+    /// Check if MSAA is enabled
+    bool isMsaaEnabled() const { return msaaSamples_ != VK_SAMPLE_COUNT_1_BIT; }
 
     /**
      * @brief Begin a new frame
@@ -176,25 +196,33 @@ private:
 
     void createSwapChain();
     void createRenderPass();
+    void createColorResources();
     void createDepthResources();
     void createFramebuffers();
     void createSyncObjects();
     void recreateSwapChain();
     void cleanupSwapChain();
+    VkSampleCountFlagBits selectMsaaSamples(MSAALevel level);
 
     // Configuration
     RendererConfig config_;
     Instance* instance_ = nullptr;
     Surface* surface_ = nullptr;
 
-    // Core objects
-    PhysicalDevice* physicalDevice_ = nullptr;
+    // Core objects - SimpleRenderer owns the PhysicalDevice by value to ensure
+    // it outlives the LogicalDevice which holds a pointer to it
+    PhysicalDevice physicalDevice_;
     LogicalDevicePtr device_;
     SwapChainPtr swapChain_;
     RenderPassPtr renderPass_;
     CommandPoolPtr commandPool_;
     std::unique_ptr<FrameSyncObjects> syncObjects_;
     std::unique_ptr<SwapChainFramebuffers> framebuffers_;
+
+    // MSAA
+    VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
+    ImagePtr colorImage_;      // MSAA color buffer (resolve target is swap chain)
+    ImageViewPtr colorView_;
 
     // Depth buffer
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;

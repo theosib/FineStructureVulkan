@@ -88,6 +88,27 @@ public:
     /// Get the owning device
     LogicalDevice* device() const { return device_; }
 
+    /// Bind descriptor sets to a command buffer
+    void bindDescriptorSets(VkCommandBuffer cmd, const VkDescriptorSet* sets,
+                            uint32_t count, uint32_t firstSet = 0) const {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_,
+                                firstSet, count, sets, 0, nullptr);
+    }
+
+    /// Bind a single descriptor set
+    void bindDescriptorSet(VkCommandBuffer cmd, VkDescriptorSet set,
+                           uint32_t setIndex = 0) const {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_,
+                                setIndex, 1, &set, 0, nullptr);
+    }
+
+    /// Push constants to a command buffer
+    template<typename T>
+    void pushConstants(VkCommandBuffer cmd, VkShaderStageFlags stages,
+                       const T& data, uint32_t offset = 0) const {
+        vkCmdPushConstants(cmd, layout_, stages, offset, sizeof(T), &data);
+    }
+
     /// Destructor
     ~PipelineLayout();
 
@@ -225,6 +246,11 @@ public:
 
     /// Get the owning device
     LogicalDevice* device() const { return device_; }
+
+    /// Bind this pipeline to a command buffer
+    void bind(VkCommandBuffer cmd) const {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    }
 
     /// Destructor
     ~GraphicsPipeline();

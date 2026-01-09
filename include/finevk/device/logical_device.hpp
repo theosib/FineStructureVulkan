@@ -1,6 +1,7 @@
 #pragma once
 
 #include "finevk/core/types.hpp"
+#include "finevk/device/physical_device.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -8,7 +9,6 @@
 
 namespace finevk {
 
-class PhysicalDevice;
 class Surface;
 class Queue;
 class MemoryAllocator;

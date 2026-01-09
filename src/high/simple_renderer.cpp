@@ -17,6 +17,31 @@
 
 namespace finevk {
 
+VkSampleCountFlagBits SimpleRenderer::selectMsaaSamples(MSAALevel level) {
+    // Get max supported sample count
+    VkSampleCountFlags counts =
+        physicalDevice_.capabilities().properties.limits.framebufferColorSampleCounts &
+        physicalDevice_.capabilities().properties.limits.framebufferDepthSampleCounts;
+
+    VkSampleCountFlagBits requested = static_cast<VkSampleCountFlagBits>(static_cast<int>(level));
+
+    // Find the highest supported sample count that doesn't exceed requested
+    if (requested >= VK_SAMPLE_COUNT_16_BIT && (counts & VK_SAMPLE_COUNT_16_BIT)) {
+        return VK_SAMPLE_COUNT_16_BIT;
+    }
+    if (requested >= VK_SAMPLE_COUNT_8_BIT && (counts & VK_SAMPLE_COUNT_8_BIT)) {
+        return VK_SAMPLE_COUNT_8_BIT;
+    }
+    if (requested >= VK_SAMPLE_COUNT_4_BIT && (counts & VK_SAMPLE_COUNT_4_BIT)) {
+        return VK_SAMPLE_COUNT_4_BIT;
+    }
+    if (requested >= VK_SAMPLE_COUNT_2_BIT && (counts & VK_SAMPLE_COUNT_2_BIT)) {
+        return VK_SAMPLE_COUNT_2_BIT;
+    }
+
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
 std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     Instance* instance,
     Surface* surface,
@@ -27,17 +52,23 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     renderer->surface_ = surface;
     renderer->config_ = config;
 
-    // Select physical device using existing API
-    auto physicalDevice = PhysicalDevice::selectBest(instance, surface);
+    // Select physical device using existing API and store by value
+    renderer->physicalDevice_ = PhysicalDevice::selectBest(instance, surface);
 
     // Create logical device using existing builder pattern
-    renderer->device_ = physicalDevice.createLogicalDevice()
+    renderer->device_ = renderer->physicalDevice_.createLogicalDevice()
         .surface(surface)
         .addExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+        .enableAnisotropy()  // Enable anisotropic filtering for textures
         .build();
 
-    // Store physical device pointer from the logical device
-    renderer->physicalDevice_ = renderer->device_->physicalDevice();
+    // Select MSAA sample count based on config and hardware support
+    renderer->msaaSamples_ = renderer->selectMsaaSamples(config.msaa);
+
+    if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        FINEVK_INFO(LogCategory::Core, "MSAA enabled: " +
+            std::to_string(static_cast<int>(renderer->msaaSamples_)) + "x");
+    }
 
     // Create command pool
     renderer->commandPool_ = std::make_unique<CommandPool>(
@@ -48,6 +79,9 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     // Create swap chain and related resources
     renderer->createSwapChain();
     renderer->createRenderPass();
+    if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        renderer->createColorResources();
+    }
     if (config.enableDepthBuffer) {
         renderer->createDepthResources();
     }
@@ -78,7 +112,6 @@ void SimpleRenderer::createSwapChain() {
 void SimpleRenderer::createRenderPass() {
     // Find depth format if needed
     if (config_.enableDepthBuffer) {
-        // Try common depth formats
         std::vector<VkFormat> candidates = {
             VK_FORMAT_D32_SFLOAT,
             VK_FORMAT_D32_SFLOAT_S8_UINT,
@@ -89,7 +122,7 @@ void SimpleRenderer::createRenderPass() {
         for (VkFormat format : candidates) {
             VkFormatProperties props;
             vkGetPhysicalDeviceFormatProperties(
-                physicalDevice_->handle(), format, &props);
+                physicalDevice_.handle(), format, &props);
             if ((props.optimalTilingFeatures & features) == features) {
                 depthFormat_ = format;
                 break;
@@ -106,8 +139,20 @@ void SimpleRenderer::createRenderPass() {
         device_.get(),
         swapChain_->format().format,
         depthFormat_,
-        config_.msaaSamples,
+        msaaSamples_,
         true);  // for presentation
+}
+
+void SimpleRenderer::createColorResources() {
+    // Create MSAA color buffer
+    colorImage_ = Image::createColorAttachment(
+        device_.get(),
+        swapChain_->extent().width,
+        swapChain_->extent().height,
+        swapChain_->format().format,
+        msaaSamples_);
+
+    colorView_ = colorImage_->createView(VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void SimpleRenderer::createDepthResources() {
@@ -115,16 +160,27 @@ void SimpleRenderer::createDepthResources() {
         device_.get(),
         swapChain_->extent().width,
         swapChain_->extent().height,
-        config_.msaaSamples);
+        msaaSamples_);
 
     depthView_ = depthImage_->createView(VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void SimpleRenderer::createFramebuffers() {
-    framebuffers_ = std::make_unique<SwapChainFramebuffers>(
-        swapChain_.get(),
-        renderPass_.get(),
-        depthView_.get());
+    // For MSAA, we need color -> depth -> resolve order
+    // For non-MSAA, we just need color -> depth
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        // With MSAA: framebuffer attachments are [color MSAA, depth, resolve]
+        framebuffers_ = std::make_unique<SwapChainFramebuffers>(
+            swapChain_.get(),
+            renderPass_.get(),
+            colorView_.get(),
+            depthView_.get());
+    } else {
+        framebuffers_ = std::make_unique<SwapChainFramebuffers>(
+            swapChain_.get(),
+            renderPass_.get(),
+            depthView_.get());
+    }
 }
 
 void SimpleRenderer::createSyncObjects() {
@@ -185,7 +241,7 @@ void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
 
     std::vector<VkClearValue> clearValues;
 
-    // Color clear
+    // Color clear (MSAA or direct)
     VkClearValue colorClear{};
     colorClear.color = {{clearColor.r, clearColor.g, clearColor.b, clearColor.a}};
     clearValues.push_back(colorClear);
@@ -195,6 +251,11 @@ void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
         VkClearValue depthClear{};
         depthClear.depthStencil = {1.0f, 0};
         clearValues.push_back(depthClear);
+    }
+
+    // Resolve attachment clear (for MSAA)
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        clearValues.push_back(colorClear);  // Resolve target
     }
 
     VkRect2D renderArea{};
@@ -292,6 +353,9 @@ void SimpleRenderer::recreateSwapChain() {
     cleanupSwapChain();
 
     createSwapChain();
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        createColorResources();
+    }
     if (config_.enableDepthBuffer) {
         createDepthResources();
     }
@@ -304,6 +368,8 @@ void SimpleRenderer::recreateSwapChain() {
 
 void SimpleRenderer::cleanupSwapChain() {
     framebuffers_.reset();
+    colorView_.reset();
+    colorImage_.reset();
     depthView_.reset();
     depthImage_.reset();
     swapChain_.reset();
@@ -322,8 +388,8 @@ Sampler* SimpleRenderer::defaultSampler() {
             .mipLod(0.0f, VK_LOD_CLAMP_NONE);
 
         // Only enable anisotropy if the feature was enabled on the device
-        if (physicalDevice_->capabilities().supportsAnisotropy()) {
-            float maxAnisotropy = physicalDevice_->capabilities().properties.limits.maxSamplerAnisotropy;
+        if (physicalDevice_.capabilities().supportsAnisotropy()) {
+            float maxAnisotropy = physicalDevice_.capabilities().properties.limits.maxSamplerAnisotropy;
             builder.anisotropy(maxAnisotropy);
         }
 

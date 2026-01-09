@@ -85,12 +85,23 @@ private:
 
 /**
  * @brief Manages framebuffers for a swap chain (one per image)
+ *
+ * Supports both non-MSAA and MSAA rendering. For MSAA, provide a color
+ * attachment that will be resolved to the swap chain images.
+ *
+ * Attachment order for render passes:
+ * - Non-MSAA: [color (swap chain), depth (optional)]
+ * - MSAA: [color MSAA, depth (optional), resolve (swap chain)]
  */
 class SwapChainFramebuffers {
 public:
-    /// Create framebuffers for a swap chain
+    /// Create framebuffers for a swap chain (non-MSAA)
     SwapChainFramebuffers(SwapChain* swapChain, RenderPass* renderPass,
                           ImageView* depthView = nullptr);
+
+    /// Create framebuffers for a swap chain with MSAA
+    SwapChainFramebuffers(SwapChain* swapChain, RenderPass* renderPass,
+                          ImageView* colorMsaaView, ImageView* depthView);
 
     /// Get framebuffer at index
     Framebuffer& operator[](size_t index) { return *framebuffers_[index]; }
@@ -99,9 +110,13 @@ public:
     /// Get number of framebuffers
     size_t count() const { return framebuffers_.size(); }
 
-    /// Recreate all framebuffers (after swap chain recreation)
+    /// Recreate all framebuffers (after swap chain recreation, non-MSAA)
     void recreate(SwapChain* swapChain, RenderPass* renderPass,
                   ImageView* depthView = nullptr);
+
+    /// Recreate all framebuffers (after swap chain recreation, with MSAA)
+    void recreate(SwapChain* swapChain, RenderPass* renderPass,
+                  ImageView* colorMsaaView, ImageView* depthView);
 
     /// Destructor
     ~SwapChainFramebuffers() = default;
@@ -117,6 +132,8 @@ public:
 private:
     void createFramebuffers(SwapChain* swapChain, RenderPass* renderPass,
                             ImageView* depthView);
+    void createFramebuffersMsaa(SwapChain* swapChain, RenderPass* renderPass,
+                                ImageView* colorMsaaView, ImageView* depthView);
 
     std::vector<FramebufferPtr> framebuffers_;
 };

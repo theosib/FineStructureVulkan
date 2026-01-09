@@ -12,6 +12,9 @@ class LogicalDevice;
 class Buffer;
 class ImageView;
 class Sampler;
+class PipelineLayout;
+class CommandBuffer;
+class SimpleRenderer;
 
 /**
  * @brief Vulkan descriptor set layout wrapper
@@ -192,10 +195,57 @@ public:
     void clear();
 
 private:
+    void fixupPointers();  // Fixup pointers after all writes are added
+
     LogicalDevice* device_;
     std::vector<VkWriteDescriptorSet> writes_;
     std::vector<VkDescriptorBufferInfo> bufferInfos_;
     std::vector<VkDescriptorImageInfo> imageInfos_;
+    // Track which info each write uses (index into bufferInfos_ or imageInfos_, -1 if not applicable)
+    std::vector<int> bufferInfoIndices_;
+    std::vector<int> imageInfoIndices_;
+};
+
+/**
+ * @brief Per-frame descriptor set binding with automatic frame selection
+ *
+ * Holds descriptor sets for each frame in flight and automatically binds
+ * the correct one based on the renderer's current frame index.
+ */
+class DescriptorBinding {
+public:
+    /**
+     * @brief Create a descriptor binding for per-frame descriptor sets
+     * @param renderer The renderer (used to get current frame index)
+     * @param layout The pipeline layout to bind with
+     * @param sets The descriptor sets (one per frame in flight)
+     * @param setIndex Which descriptor set slot to bind to (default 0)
+     */
+    DescriptorBinding(SimpleRenderer& renderer, PipelineLayout& layout,
+                      std::vector<VkDescriptorSet> sets, uint32_t setIndex = 0);
+
+    /// Convenience constructor accepting pointers/smart pointers
+    DescriptorBinding(SimpleRenderer* renderer, PipelineLayout* layout,
+                      std::vector<VkDescriptorSet> sets, uint32_t setIndex = 0)
+        : DescriptorBinding(*renderer, *layout, std::move(sets), setIndex) {}
+
+    /// Bind the descriptor set for the current frame
+    void bind(CommandBuffer& cmd) const;
+
+    /// Get the descriptor set for a specific frame
+    VkDescriptorSet set(uint32_t frameIndex) const { return sets_[frameIndex]; }
+
+    /// Get descriptor set for the current frame
+    VkDescriptorSet currentSet() const;
+
+    /// Get number of sets
+    uint32_t count() const { return static_cast<uint32_t>(sets_.size()); }
+
+private:
+    SimpleRenderer* renderer_;
+    PipelineLayout* layout_;
+    std::vector<VkDescriptorSet> sets_;
+    uint32_t setIndex_;
 };
 
 } // namespace finevk

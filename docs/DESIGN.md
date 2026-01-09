@@ -2219,6 +2219,20 @@ A high-level class that ties everything together for common use cases:
 ```cpp
 namespace finevk {
 
+/**
+ * @brief MSAA quality level for easy configuration
+ *
+ * Higher levels provide smoother edges but require more GPU resources.
+ * The actual sample count is clamped to what the GPU supports.
+ */
+enum class MSAALevel {
+    Off = 1,      // No multisampling (fastest, maximum compatibility)
+    Low = 2,      // 2x MSAA - minimal quality improvement
+    Medium = 4,   // 4x MSAA - good balance (recommended)
+    High = 8,     // 8x MSAA - high quality
+    Ultra = 16    // 16x MSAA - maximum quality (rarely needed)
+};
+
 class SimpleRenderer {
 public:
     struct Config {
@@ -2226,8 +2240,9 @@ public:
         uint32_t height = 600;
         const char* title = "Vulkan App";
         bool vsync = true;
-        VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+        MSAALevel msaa = MSAALevel::Off;  // Default: no MSAA for maximum compatibility
         uint32_t framesInFlight = 2;
+        bool enableDepthBuffer = true;
     };
 
     explicit SimpleRenderer(const Config& config);
@@ -3663,18 +3678,27 @@ Build and test independently before moving on.
 
 ### Phase 5: High-Level Helpers
 
-1. **Mesh** - OBJ loading
-2. **UniformBuffer**
-3. **SimpleRenderer**
-4. **MSAA support**
+**Completed (January 2026):**
+1. **Mesh** - OBJ loading with vertex deduplication
+2. **UniformBuffer<T>** - Per-frame uniform buffers
+3. **SimpleRenderer** - Frame lifecycle management with MSAA
+4. **MSAA support** - MSAALevel enum, automatic resolve attachments
+
+**TODO - Still needed for design doc API simplification:**
+5. **Material class** - Automatic descriptor set/pool/layout management
+   - Bind uniforms and textures with single calls
+   - Auto-generate pipeline layout from material
+6. **Window integration** - `shouldClose()`, `pollEvents()` in SimpleRenderer
+7. **Pipeline factory** - `renderer.createPipeline()` that infers layout from material
+8. **cmd() accessor** - Return current command buffer directly from renderer
 
 **Milestone**: Can render viking room model with MSAA
 
 **Phase Complete When**:
-- Viking room model loads and renders correctly
-- MSAA 4x works without artifacts
-- Depth testing correct (no z-fighting, proper occlusion)
-- `SimpleRenderer` API matches design document examples
+- Viking room model loads and renders correctly (DONE)
+- MSAA 4x works without artifacts (DONE)
+- Depth testing correct (no z-fighting, proper occlusion) (DONE)
+- `SimpleRenderer` API matches design document examples (PARTIAL - needs Material class)
 
 ### Phase 6: Game Engine Patterns
 
@@ -3698,12 +3722,15 @@ Build and test independently before moving on.
 1. Additional convenience factories
 2. More examples
 3. Performance optimization
-4. Documentation
+4. Documentation - TWO comprehensive user guides:
+   - **Human-optimized guide**: Easy to understand, progressive disclosure, tutorials
+   - **LLM-optimized guide**: Maximum semantic content per token, no ambiguity, minimal redundancy, structured for machine parsing
 
 **Phase Complete When**:
 - All examples from Section 15 compile and run correctly
 - No memory leaks detected by validation layers or sanitizers
 - API documentation covers all public interfaces
+- Both user guides (human and LLM) are complete
 
 ---
 

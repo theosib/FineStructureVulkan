@@ -1,8 +1,11 @@
 #include "finevk/rendering/descriptors.hpp"
+#include "finevk/rendering/pipeline.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/image.hpp"
 #include "finevk/device/sampler.hpp"
+#include "finevk/device/command.hpp"
+#include "finevk/high/simple_renderer.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <stdexcept>
@@ -270,6 +273,7 @@ DescriptorWriter& DescriptorWriter::writeBuffer(
     VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) {
 
     bufferInfos_.push_back({buffer, offset, range});
+    int bufferIndex = static_cast<int>(bufferInfos_.size() - 1);
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -278,9 +282,12 @@ DescriptorWriter& DescriptorWriter::writeBuffer(
     write.dstArrayElement = 0;
     write.descriptorType = type;
     write.descriptorCount = 1;
-    write.pBufferInfo = &bufferInfos_.back();
+    // Don't set pBufferInfo here - it will be fixed up in update()
+    write.pBufferInfo = nullptr;
 
     writes_.push_back(write);
+    bufferInfoIndices_.push_back(bufferIndex);
+    imageInfoIndices_.push_back(-1);
     return *this;
 }
 
@@ -294,6 +301,7 @@ DescriptorWriter& DescriptorWriter::writeImage(
     VkImageView imageView, VkSampler sampler, VkImageLayout layout) {
 
     imageInfos_.push_back({sampler, imageView, layout});
+    int imageIndex = static_cast<int>(imageInfos_.size() - 1);
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -302,9 +310,12 @@ DescriptorWriter& DescriptorWriter::writeImage(
     write.dstArrayElement = 0;
     write.descriptorType = type;
     write.descriptorCount = 1;
-    write.pImageInfo = &imageInfos_.back();
+    // Don't set pImageInfo here - it will be fixed up in update()
+    write.pImageInfo = nullptr;
 
     writes_.push_back(write);
+    bufferInfoIndices_.push_back(-1);
+    imageInfoIndices_.push_back(imageIndex);
     return *this;
 }
 
@@ -314,8 +325,22 @@ DescriptorWriter& DescriptorWriter::writeImage(
     return writeImage(set, binding, type, imageView->handle(), sampler->handle(), layout);
 }
 
+void DescriptorWriter::fixupPointers() {
+    // Now that all writes are added, we can safely assign pointers
+    // since the vectors won't reallocate anymore
+    for (size_t i = 0; i < writes_.size(); i++) {
+        if (bufferInfoIndices_[i] >= 0) {
+            writes_[i].pBufferInfo = &bufferInfos_[bufferInfoIndices_[i]];
+        }
+        if (imageInfoIndices_[i] >= 0) {
+            writes_[i].pImageInfo = &imageInfos_[imageInfoIndices_[i]];
+        }
+    }
+}
+
 void DescriptorWriter::update() {
     if (!writes_.empty()) {
+        fixupPointers();
         vkUpdateDescriptorSets(
             device_->handle(),
             static_cast<uint32_t>(writes_.size()),
@@ -329,6 +354,28 @@ void DescriptorWriter::clear() {
     writes_.clear();
     bufferInfos_.clear();
     imageInfos_.clear();
+    bufferInfoIndices_.clear();
+    imageInfoIndices_.clear();
+}
+
+// ============================================================================
+// DescriptorBinding implementation
+// ============================================================================
+
+DescriptorBinding::DescriptorBinding(SimpleRenderer& renderer, PipelineLayout& layout,
+                                     std::vector<VkDescriptorSet> sets, uint32_t setIndex)
+    : renderer_(&renderer)
+    , layout_(&layout)
+    , sets_(std::move(sets))
+    , setIndex_(setIndex) {
+}
+
+void DescriptorBinding::bind(CommandBuffer& cmd) const {
+    cmd.bindDescriptorSet(*layout_, sets_[renderer_->currentFrame()], setIndex_);
+}
+
+VkDescriptorSet DescriptorBinding::currentSet() const {
+    return sets_[renderer_->currentFrame()];
 }
 
 } // namespace finevk

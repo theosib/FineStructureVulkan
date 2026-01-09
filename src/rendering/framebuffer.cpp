@@ -115,6 +115,12 @@ SwapChainFramebuffers::SwapChainFramebuffers(
     createFramebuffers(swapChain, renderPass, depthView);
 }
 
+SwapChainFramebuffers::SwapChainFramebuffers(
+    SwapChain* swapChain, RenderPass* renderPass,
+    ImageView* colorMsaaView, ImageView* depthView) {
+    createFramebuffersMsaa(swapChain, renderPass, colorMsaaView, depthView);
+}
+
 void SwapChainFramebuffers::createFramebuffers(
     SwapChain* swapChain, RenderPass* renderPass, ImageView* depthView) {
 
@@ -140,9 +146,44 @@ void SwapChainFramebuffers::createFramebuffers(
         " swap chain framebuffers");
 }
 
+void SwapChainFramebuffers::createFramebuffersMsaa(
+    SwapChain* swapChain, RenderPass* renderPass,
+    ImageView* colorMsaaView, ImageView* depthView) {
+
+    framebuffers_.clear();
+    framebuffers_.reserve(swapChain->imageCount());
+
+    const auto& imageViews = swapChain->imageViews();
+    VkExtent2D extent = swapChain->extent();
+
+    // For MSAA, attachment order is: [color MSAA, depth (optional), resolve (swap chain)]
+    for (size_t i = 0; i < imageViews.size(); i++) {
+        auto builder = Framebuffer::create(swapChain->device(), renderPass)
+            .extent(extent.width, extent.height)
+            .attachment(colorMsaaView->handle());  // MSAA color target
+
+        if (depthView) {
+            builder.attachment(depthView->handle());  // Depth buffer
+        }
+
+        builder.attachment(imageViews[i]->handle());  // Resolve target (swap chain)
+
+        framebuffers_.push_back(builder.build());
+    }
+
+    FINEVK_DEBUG(LogCategory::Core, "Created " + std::to_string(framebuffers_.size()) +
+        " swap chain framebuffers with MSAA");
+}
+
 void SwapChainFramebuffers::recreate(
     SwapChain* swapChain, RenderPass* renderPass, ImageView* depthView) {
     createFramebuffers(swapChain, renderPass, depthView);
+}
+
+void SwapChainFramebuffers::recreate(
+    SwapChain* swapChain, RenderPass* renderPass,
+    ImageView* colorMsaaView, ImageView* depthView) {
+    createFramebuffersMsaa(swapChain, renderPass, colorMsaaView, depthView);
 }
 
 } // namespace finevk
