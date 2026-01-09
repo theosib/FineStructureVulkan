@@ -21,5 +21,12 @@ add_executable(test_phase3
 
 target_link_libraries(test_phase3 PRIVATE finevk-core)
 
+# Phase 4 test - High-Level Abstractions
+add_executable(test_phase4
+    test_phase4.cpp
+)
+
+target_link_libraries(test_phase4 PRIVATE finevk-core)
+
 # Copy any required resources
-# (none for Phase 1/2/3)
+# (none for Phase 1/2/3/4)

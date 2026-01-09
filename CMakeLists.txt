@@ -104,6 +104,11 @@ add_library(finevk-core
     src/rendering/sync.cpp
     src/rendering/descriptors.cpp
 
+    # Layer 4: High-Level Abstractions
+    src/high/texture.cpp
+    src/high/mesh.cpp
+    src/high/simple_renderer.cpp
+
     # Platform
     src/platform/glfw_surface.cpp
 )
@@ -111,6 +116,12 @@ add_library(finevk-core
 target_include_directories(finevk-core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+)
+
+# External header-only libraries (stb_image, tinyobjloader)
+target_include_directories(finevk-core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
 )
 
 target_link_libraries(finevk-core PUBLIC

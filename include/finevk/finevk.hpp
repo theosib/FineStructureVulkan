@@ -26,5 +26,12 @@
 #include "finevk/rendering/sync.hpp"
 #include "finevk/rendering/descriptors.hpp"
 
+// High-Level Abstractions (Layer 4)
+#include "finevk/high/texture.hpp"
+#include "finevk/high/mesh.hpp"
+#include "finevk/high/uniform_buffer.hpp"
+#include "finevk/high/format_utils.hpp"
+#include "finevk/high/simple_renderer.hpp"
+
 // Forward declarations and common types
 #include "finevk/core/types.hpp"
