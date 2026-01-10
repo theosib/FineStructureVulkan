@@ -106,6 +106,7 @@ ImagePtr Image::Builder::build() {
     image->format_ = format_;
     image->extent_ = extent_;
     image->mipLevels_ = mipLevels_;
+    image->samples_ = samples_;
     image->allocation_ = allocation;
     image->ownsMemory_ = true;
 
@@ -186,8 +187,10 @@ Image::Image(Image&& other) noexcept
     , format_(other.format_)
     , extent_(other.extent_)
     , mipLevels_(other.mipLevels_)
+    , samples_(other.samples_)
     , allocation_(other.allocation_)
-    , ownsMemory_(other.ownsMemory_) {
+    , ownsMemory_(other.ownsMemory_)
+    , defaultView_(std::move(other.defaultView_)) {
     other.image_ = VK_NULL_HANDLE;
     other.allocation_ = {};
 }
@@ -200,8 +203,10 @@ Image& Image::operator=(Image&& other) noexcept {
         format_ = other.format_;
         extent_ = other.extent_;
         mipLevels_ = other.mipLevels_;
+        samples_ = other.samples_;
         allocation_ = other.allocation_;
         ownsMemory_ = other.ownsMemory_;
+        defaultView_ = std::move(other.defaultView_);
         other.image_ = VK_NULL_HANDLE;
         other.allocation_ = {};
     }
@@ -209,6 +214,9 @@ Image& Image::operator=(Image&& other) noexcept {
 }
 
 void Image::cleanup() {
+    // Destroy the default view first (it references this image)
+    defaultView_.reset();
+
     if (image_ != VK_NULL_HANDLE && device_ != nullptr && ownsMemory_) {
         vkDestroyImage(device_->handle(), image_, nullptr);
         device_->allocator().free(allocation_);
@@ -235,6 +243,56 @@ ImageViewPtr Image::createView(VkImageAspectFlags aspectMask) {
     }
 
     return ImageViewPtr(new ImageView(device_, this, view));
+}
+
+ImageView* Image::view() {
+    if (!defaultView_) {
+        // Determine aspect mask based on format
+        VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        // Check if this is a depth/stencil format
+        switch (format_) {
+            case VK_FORMAT_D16_UNORM:
+            case VK_FORMAT_D32_SFLOAT:
+            case VK_FORMAT_X8_D24_UNORM_PACK32:
+                aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                break;
+            case VK_FORMAT_D16_UNORM_S8_UINT:
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;  // Default to depth only for combined formats
+                break;
+            case VK_FORMAT_S8_UINT:
+                aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+                break;
+            default:
+                aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                break;
+        }
+
+        defaultView_ = createView(aspectMask);
+    }
+    return defaultView_.get();
+}
+
+ImagePtr Image::createMatchingDepthBuffer(VkFormat format, VkSampleCountFlagBits samples) {
+    // Use this image's samples if not specified
+    if (samples == VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM) {
+        samples = samples_;
+    }
+
+    // Auto-select depth format if not specified
+    if (format == VK_FORMAT_UNDEFINED) {
+        format = VK_FORMAT_D32_SFLOAT;  // Default to highest precision
+    }
+
+    return create(device_)
+        .extent(extent_.width, extent_.height)
+        .format(format)
+        .usage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        .samples(samples)
+        .memoryUsage(MemoryUsage::GpuOnly)
+        .build();
 }
 
 // ============================================================================

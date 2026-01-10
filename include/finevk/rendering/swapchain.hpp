@@ -68,6 +68,10 @@ public:
 
     /// Create a builder for a swap chain
     static Builder create(LogicalDevice* device, Surface* surface);
+    static Builder create(LogicalDevice& device, Surface& surface) { return create(&device, &surface); }
+    static Builder create(LogicalDevice& device, Surface* surface) { return create(&device, surface); }
+    static Builder create(LogicalDevice* device, Surface& surface) { return create(device, &surface); }
+    static Builder create(const LogicalDevicePtr& device, const SurfacePtr& surface) { return create(device.get(), surface.get()); }
 
     /// Get the Vulkan swap chain handle
     VkSwapchainKHR handle() const { return swapChain_; }

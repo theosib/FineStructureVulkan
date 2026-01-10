@@ -32,6 +32,20 @@ auto obj = ClassName::create(device)
 auto obj = ClassName::create(device, args...);  // Returns ClassNamePtr
 ```
 
+### Parameter Overloads (No .get() Required)
+
+All factory methods accept multiple parameter types:
+```cpp
+// All equivalent - use whichever is convenient:
+SwapChain::create(device.get(), surface.get())  // raw pointers
+SwapChain::create(*device, *surface)            // references
+SwapChain::create(device, surface)              // unique_ptr directly
+
+// Same for constructors:
+CommandPool(device.get(), queue)
+CommandPool(*device, *queue)
+```
+
 ### Template Methods
 
 ```cpp
@@ -100,12 +114,88 @@ LogicalDevice:
     waitIdle()
 ```
 
-### Surface (GLFWSurface)
+### Surface
 
 ```cpp
-GLFWSurface::create(Instance*, GLFWwindow*) -> SurfacePtr
+Instance::createSurface(GLFWwindow*) -> SurfacePtr  // Low-level, prefer Window
 Surface:
     handle() -> VkSurfaceKHR
+```
+
+### Window (Recommended)
+
+Abstracts GLFW and manages swap chain + synchronization automatically.
+
+```cpp
+Window::create(Instance*)
+    .title(string)
+    .size(width, height)
+    .resizable(bool)
+    .fullscreen(bool)
+    .vsync(bool)
+    .framesInFlight(uint32_t)
+    .build() -> WindowPtr
+
+Window:
+    // State
+    isOpen() -> bool
+    close()
+    size() -> glm::uvec2
+    width(), height() -> uint32_t
+    isMinimized() -> bool
+    isFocused() -> bool
+
+    // Vulkan objects
+    instance() -> Instance*
+    surface() -> Surface*
+    swapChain() -> SwapChain*
+    extent() -> VkExtent2D
+    format() -> VkFormat
+
+    // Device binding (creates swap chain + sync objects)
+    bindDevice(LogicalDevice&/*/unique_ptr)
+    hasDevice() -> bool
+    device() -> LogicalDevice*
+    framesInFlight() -> uint32_t
+    currentFrame() -> uint32_t
+
+    // Frame lifecycle
+    beginFrame() -> optional<FrameInfo>  // nullopt if minimized
+    endFrame() -> bool
+    waitIdle()
+
+    // Events
+    pollEvents()
+    waitEvents()
+    onResize(function<void(uint32_t, uint32_t)>)
+    onKey(function<void(Key, Action, Modifier)>)
+    onMouseButton(function<void(MouseButton, Action, Modifier)>)
+    onMouseMove(function<void(double, double)>)
+    onScroll(function<void(double, double)>)
+
+    // Input polling
+    isKeyPressed(Key) -> bool
+    isMouseButtonPressed(MouseButton) -> bool
+    mousePosition() -> glm::dvec2
+    setMouseCaptured(bool)
+    isMouseCaptured() -> bool
+
+struct FrameInfo {
+    uint32_t imageIndex;      // Which swap chain image
+    uint32_t frameIndex;      // Which frame-in-flight (0 to framesInFlight-1)
+    VkExtent2D extent;
+    VkImage image;
+    VkImageView imageView;
+    VkSemaphore imageAvailable;   // Wait on this before rendering
+    VkSemaphore renderFinished;   // Signal this when done
+    VkFence inFlightFence;        // Signal this in queue submit
+};
+
+// Input enums
+enum class Key { A-Z, Num0-9, F1-F12, Escape, Enter, Tab, Space, etc. };
+enum class MouseButton { Left, Right, Middle, Button4, Button5 };
+enum class Action { Release, Press, Repeat };
+enum class Modifier { None, Shift, Control, Alt, Super, CapsLock, NumLock };
 ```
 
 ## Resource Classes
@@ -646,15 +736,17 @@ renderer->waitIdle();
 include/finevk/
   core/         instance.hpp, surface.hpp, types.hpp, logging.hpp
   device/       physical_device.hpp, logical_device.hpp, buffer.hpp,
-                image.hpp, sampler.hpp, memory.hpp
+                image.hpp, sampler.hpp, memory.hpp, command.hpp
   rendering/    swapchain.hpp, renderpass.hpp, framebuffer.hpp,
-                pipeline.hpp, descriptors.hpp, sync.hpp, commands.hpp
+                pipeline.hpp, descriptors.hpp, sync.hpp
   high/         simple_renderer.hpp, texture.hpp, mesh.hpp,
                 uniform_buffer.hpp, vertex.hpp
+  window/       window.hpp
   platform/     glfw_surface.hpp
   finevk.hpp    (umbrella header)
 
 src/            (implementation files mirror include structure)
-examples/       triangle/, viking_room/
+examples/       hello_triangle/, viking_room/
 tests/          test_phase1.cpp - test_phase4.cpp
+docs/           ARCHITECTURE.md, USER_GUIDE.md, USER_GUIDE_LLM.md, DESIGN.md
 ```

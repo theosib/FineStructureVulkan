@@ -44,18 +44,28 @@ public:
 
     /// Create a builder for a buffer
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Create a vertex buffer (GPU-only, requires staging)
     static BufferPtr createVertexBuffer(LogicalDevice* device, VkDeviceSize size);
+    static BufferPtr createVertexBuffer(LogicalDevice& device, VkDeviceSize size) { return createVertexBuffer(&device, size); }
+    static BufferPtr createVertexBuffer(const LogicalDevicePtr& device, VkDeviceSize size) { return createVertexBuffer(device.get(), size); }
 
     /// Create an index buffer (GPU-only, requires staging)
     static BufferPtr createIndexBuffer(LogicalDevice* device, VkDeviceSize size);
+    static BufferPtr createIndexBuffer(LogicalDevice& device, VkDeviceSize size) { return createIndexBuffer(&device, size); }
+    static BufferPtr createIndexBuffer(const LogicalDevicePtr& device, VkDeviceSize size) { return createIndexBuffer(device.get(), size); }
 
     /// Create a uniform buffer (CPU-visible for frequent updates)
     static BufferPtr createUniformBuffer(LogicalDevice* device, VkDeviceSize size);
+    static BufferPtr createUniformBuffer(LogicalDevice& device, VkDeviceSize size) { return createUniformBuffer(&device, size); }
+    static BufferPtr createUniformBuffer(const LogicalDevicePtr& device, VkDeviceSize size) { return createUniformBuffer(device.get(), size); }
 
     /// Create a staging buffer (CPU-visible for transfers)
     static BufferPtr createStagingBuffer(LogicalDevice* device, VkDeviceSize size);
+    static BufferPtr createStagingBuffer(LogicalDevice& device, VkDeviceSize size) { return createStagingBuffer(&device, size); }
+    static BufferPtr createStagingBuffer(const LogicalDevicePtr& device, VkDeviceSize size) { return createStagingBuffer(device.get(), size); }
 
     /// Get the Vulkan buffer handle
     VkBuffer handle() const { return buffer_; }

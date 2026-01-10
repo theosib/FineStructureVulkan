@@ -10,7 +10,7 @@
 #include "finevk/rendering/swapchain.hpp"
 #include "finevk/rendering/renderpass.hpp"
 #include "finevk/rendering/framebuffer.hpp"
-#include "finevk/rendering/sync.hpp"
+#include "finevk/window/window.hpp"
 
 #include <stdexcept>
 #include <algorithm>
@@ -18,10 +18,11 @@
 namespace finevk {
 
 VkSampleCountFlagBits SimpleRenderer::selectMsaaSamples(MSAALevel level) {
-    // Get max supported sample count
+    // Get max supported sample count from the device's physical device
+    auto* physDevice = device()->physicalDevice();
     VkSampleCountFlags counts =
-        physicalDevice_.capabilities().properties.limits.framebufferColorSampleCounts &
-        physicalDevice_.capabilities().properties.limits.framebufferDepthSampleCounts;
+        physDevice->capabilities().properties.limits.framebufferColorSampleCounts &
+        physDevice->capabilities().properties.limits.framebufferDepthSampleCounts;
 
     VkSampleCountFlagBits requested = static_cast<VkSampleCountFlagBits>(static_cast<int>(level));
 
@@ -43,24 +44,20 @@ VkSampleCountFlagBits SimpleRenderer::selectMsaaSamples(MSAALevel level) {
 }
 
 std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
-    Instance* instance,
-    Surface* surface,
+    Window* window,
     const RendererConfig& config) {
 
+    if (!window) {
+        throw std::runtime_error("SimpleRenderer::create: window cannot be null");
+    }
+
+    if (!window->hasDevice()) {
+        throw std::runtime_error("SimpleRenderer::create: Window must have a bound device. Call window->bindDevice() first.");
+    }
+
     auto renderer = std::unique_ptr<SimpleRenderer>(new SimpleRenderer());
-    renderer->instance_ = instance;
-    renderer->surface_ = surface;
+    renderer->window_ = window;
     renderer->config_ = config;
-
-    // Select physical device using existing API and store by value
-    renderer->physicalDevice_ = PhysicalDevice::selectBest(instance, surface);
-
-    // Create logical device using existing builder pattern
-    renderer->device_ = renderer->physicalDevice_.createLogicalDevice()
-        .surface(surface)
-        .addExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        .enableAnisotropy()  // Enable anisotropic filtering for textures
-        .build();
 
     // Select MSAA sample count based on config and hardware support
     renderer->msaaSamples_ = renderer->selectMsaaSamples(config.msaa);
@@ -70,14 +67,10 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
             std::to_string(static_cast<int>(renderer->msaaSamples_)) + "x");
     }
 
-    // Create command pool
-    renderer->commandPool_ = std::make_unique<CommandPool>(
-        renderer->device_.get(),
-        renderer->device_->graphicsQueue(),
-        CommandPoolFlags::Resettable);
+    // Use device's default command pool
+    renderer->commandPool_ = renderer->device()->defaultCommandPool();
 
-    // Create swap chain and related resources
-    renderer->createSwapChain();
+    // Create rendering resources
     renderer->createRenderPass();
     if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         renderer->createColorResources();
@@ -86,27 +79,38 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
         renderer->createDepthResources();
     }
     renderer->createFramebuffers();
-    renderer->createSyncObjects();
 
     // Create command buffers for each frame in flight
-    renderer->commandBuffers_.reserve(config.framesInFlight);
-    for (uint32_t i = 0; i < config.framesInFlight; i++) {
+    uint32_t framesInFlight = window->framesInFlight();
+    renderer->commandBuffers_.reserve(framesInFlight);
+    for (uint32_t i = 0; i < framesInFlight; i++) {
         renderer->commandBuffers_.push_back(
             renderer->commandPool_->allocate());
     }
+
+    // Register for device destruction notification so we can clean up
+    // our resources before the device is destroyed
+    renderer->deviceDestructionCallbackId_ = renderer->device()->onDestruction(
+        [r = renderer.get()](LogicalDevice*) {
+            // Clean up all device-dependent resources
+            r->commandBuffers_.clear();
+            r->commandPool_ = nullptr;  // Non-owning, just clear the pointer
+            r->framebuffers_.reset();
+            r->colorView_.reset();
+            r->colorImage_.reset();
+            r->depthView_.reset();
+            r->depthImage_.reset();
+            r->renderPass_.reset();
+            r->defaultSampler_.reset();
+            r->deviceDestructionCallbackId_ = 0;
+            FINEVK_DEBUG(LogCategory::Core, "SimpleRenderer resources released (device destroying)");
+        });
 
     FINEVK_INFO(LogCategory::Core, "SimpleRenderer created: " +
         std::to_string(renderer->extent().width) + "x" +
         std::to_string(renderer->extent().height));
 
     return renderer;
-}
-
-void SimpleRenderer::createSwapChain() {
-    swapChain_ = SwapChain::create(device_.get(), surface_)
-        .vsync(config_.vsync)
-        .imageCount(config_.framesInFlight + 1)
-        .build();
 }
 
 void SimpleRenderer::createRenderPass() {
@@ -118,11 +122,12 @@ void SimpleRenderer::createRenderPass() {
             VK_FORMAT_D24_UNORM_S8_UINT
         };
 
+        auto* physDevice = device()->physicalDevice();
         VkFormatFeatureFlags features = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
         for (VkFormat format : candidates) {
             VkFormatProperties props;
             vkGetPhysicalDeviceFormatProperties(
-                physicalDevice_.handle(), format, &props);
+                physDevice->handle(), format, &props);
             if ((props.optimalTilingFeatures & features) == features) {
                 depthFormat_ = format;
                 break;
@@ -136,30 +141,34 @@ void SimpleRenderer::createRenderPass() {
 
     // Use the simple render pass factory
     renderPass_ = RenderPass::createSimple(
-        device_.get(),
-        swapChain_->format().format,
+        device(),
+        window_->format(),
         depthFormat_,
         msaaSamples_,
         true);  // for presentation
 }
 
 void SimpleRenderer::createColorResources() {
+    auto ext = extent();
+
     // Create MSAA color buffer
     colorImage_ = Image::createColorAttachment(
-        device_.get(),
-        swapChain_->extent().width,
-        swapChain_->extent().height,
-        swapChain_->format().format,
+        device(),
+        ext.width,
+        ext.height,
+        window_->format(),
         msaaSamples_);
 
     colorView_ = colorImage_->createView(VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void SimpleRenderer::createDepthResources() {
+    auto ext = extent();
+
     depthImage_ = Image::createDepthBuffer(
-        device_.get(),
-        swapChain_->extent().width,
-        swapChain_->extent().height,
+        device(),
+        ext.width,
+        ext.height,
         msaaSamples_);
 
     depthView_ = depthImage_->createView(VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -171,55 +180,99 @@ void SimpleRenderer::createFramebuffers() {
     if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         // With MSAA: framebuffer attachments are [color MSAA, depth, resolve]
         framebuffers_ = std::make_unique<SwapChainFramebuffers>(
-            swapChain_.get(),
+            swapChain(),
             renderPass_.get(),
             colorView_.get(),
             depthView_.get());
     } else {
         framebuffers_ = std::make_unique<SwapChainFramebuffers>(
-            swapChain_.get(),
+            swapChain(),
             renderPass_.get(),
             depthView_.get());
     }
 }
 
-void SimpleRenderer::createSyncObjects() {
-    syncObjects_ = std::make_unique<FrameSyncObjects>(
-        device_.get(),
-        config_.framesInFlight);
+void SimpleRenderer::recreateResources() {
+    // Called when window resize is detected
+    // Wait for device idle before recreating
+    device()->waitIdle();
+
+    cleanupResources();
+
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        createColorResources();
+    }
+    if (config_.enableDepthBuffer) {
+        createDepthResources();
+    }
+    createFramebuffers();
+
+    FINEVK_DEBUG(LogCategory::Core, "SimpleRenderer resources recreated: " +
+        std::to_string(extent().width) + "x" +
+        std::to_string(extent().height));
+}
+
+void SimpleRenderer::cleanupResources() {
+    framebuffers_.reset();
+    colorView_.reset();
+    colorImage_.reset();
+    depthView_.reset();
+    depthImage_.reset();
+}
+
+// Accessors that delegate to Window
+LogicalDevice* SimpleRenderer::device() const {
+    return window_->device();
+}
+
+SwapChain* SimpleRenderer::swapChain() const {
+    return window_->swapChain();
+}
+
+uint32_t SimpleRenderer::framesInFlight() const {
+    return window_->framesInFlight();
+}
+
+uint32_t SimpleRenderer::currentFrame() const {
+    return window_->currentFrame();
 }
 
 VkExtent2D SimpleRenderer::extent() const {
-    return swapChain_->extent();
+    return window_->extent();
 }
 
 VkFormat SimpleRenderer::colorFormat() const {
-    return swapChain_->format().format;
+    return window_->format();
 }
 
 FrameBeginResult SimpleRenderer::beginFrame() {
     FrameBeginResult result{};
 
-    // Wait for previous frame to complete
-    syncObjects_->waitForFrame();
+    // Delegate to Window for frame acquisition
+    auto frameOpt = window_->beginFrame();
 
-    // Acquire next swap chain image
-    auto acquire = swapChain_->acquireNextImage(
-        syncObjects_->imageAvailable().handle());
-
-    if (acquire.outOfDate) {
-        recreateSwapChain();
+    if (!frameOpt) {
+        // Window is minimized or resize in progress
         result.resized = true;
         return result;
     }
 
-    currentImageIndex_ = acquire.imageIndex;
+    currentFrameInfo_ = *frameOpt;
+    currentImageIndex_ = currentFrameInfo_->imageIndex;
 
-    // Reset fence after successful acquire
-    syncObjects_->resetFrame();
+    // Check if we need to recreate our resources
+    auto currentExtent = extent();
+    if (framebuffers_ && framebuffers_->count() > 0) {
+        // Check if size changed - if so, recreate
+        auto fbExtent = (*framebuffers_)[0].extent();
+        if (fbExtent.width != currentExtent.width ||
+            fbExtent.height != currentExtent.height) {
+            recreateResources();
+        }
+    }
 
     // Begin command buffer
-    auto& cmd = *commandBuffers_[currentFrame_];
+    auto& cmd = *commandBuffers_[currentFrameInfo_->frameIndex];
     cmd.reset();
     cmd.begin();
 
@@ -232,11 +285,11 @@ FrameBeginResult SimpleRenderer::beginFrame() {
 }
 
 void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
-    if (!frameInProgress_) {
+    if (!frameInProgress_ || !currentFrameInfo_) {
         return;
     }
 
-    auto& cmd = *commandBuffers_[currentFrame_];
+    auto& cmd = *commandBuffers_[currentFrameInfo_->frameIndex];
     auto& framebuffer = (*framebuffers_)[currentImageIndex_];
 
     std::vector<VkClearValue> clearValues;
@@ -260,7 +313,7 @@ void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
 
     VkRect2D renderArea{};
     renderArea.offset = {0, 0};
-    renderArea.extent = swapChain_->extent();
+    renderArea.extent = currentFrameInfo_->extent;
 
     cmd.beginRenderPass(
         renderPass_->handle(),
@@ -270,33 +323,33 @@ void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
 
     // Set viewport and scissor
     cmd.setViewport(0, 0,
-        static_cast<float>(swapChain_->extent().width),
-        static_cast<float>(swapChain_->extent().height));
+        static_cast<float>(currentFrameInfo_->extent.width),
+        static_cast<float>(currentFrameInfo_->extent.height));
     cmd.setScissor(0, 0,
-        swapChain_->extent().width,
-        swapChain_->extent().height);
+        currentFrameInfo_->extent.width,
+        currentFrameInfo_->extent.height);
 }
 
 void SimpleRenderer::endRenderPass() {
-    if (!frameInProgress_) {
+    if (!frameInProgress_ || !currentFrameInfo_) {
         return;
     }
 
-    commandBuffers_[currentFrame_]->endRenderPass();
+    commandBuffers_[currentFrameInfo_->frameIndex]->endRenderPass();
 }
 
 bool SimpleRenderer::endFrame() {
-    if (!frameInProgress_) {
+    if (!frameInProgress_ || !currentFrameInfo_) {
         return false;
     }
 
-    auto& cmd = *commandBuffers_[currentFrame_];
+    auto& cmd = *commandBuffers_[currentFrameInfo_->frameIndex];
     cmd.end();
 
-    // Submit to queue
-    VkSemaphore waitSemaphores[] = {syncObjects_->imageAvailable().handle()};
+    // Submit to queue with sync objects from Window's FrameInfo
+    VkSemaphore waitSemaphores[] = {currentFrameInfo_->imageAvailable};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    VkSemaphore signalSemaphores[] = {syncObjects_->renderFinished().handle()};
+    VkSemaphore signalSemaphores[] = {currentFrameInfo_->renderFinished};
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -310,86 +363,46 @@ bool SimpleRenderer::endFrame() {
     submitInfo.pSignalSemaphores = signalSemaphores;
 
     VkResult result = vkQueueSubmit(
-        device_->graphicsQueue()->handle(),
+        device()->graphicsQueue()->handle(),
         1, &submitInfo,
-        syncObjects_->inFlight().handle());
+        currentFrameInfo_->inFlightFence);
 
     if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to submit draw command buffer");
     }
 
-    // Present
-    VkResult presentResult = swapChain_->present(
-        device_->presentQueue(),
-        currentImageIndex_,
-        syncObjects_->renderFinished().handle());
+    // Present via Window
+    bool presented = window_->endFrame();
 
     frameInProgress_ = false;
+    currentFrameInfo_.reset();
 
-    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
-        presentResult == VK_SUBOPTIMAL_KHR ||
-        swapChain_->needsRecreation()) {
-        recreateSwapChain();
-        return true;
-    }
-
-    // Advance to next frame
-    syncObjects_->advanceFrame();
-    currentFrame_ = syncObjects_->currentFrame();
-
-    return true;
+    return presented;
 }
 
-void SimpleRenderer::resize(uint32_t width, uint32_t height) {
-    config_.width = width;
-    config_.height = height;
-    recreateSwapChain();
-}
-
-void SimpleRenderer::recreateSwapChain() {
-    // Wait for device to be idle
-    vkDeviceWaitIdle(device_->handle());
-
-    cleanupSwapChain();
-
-    createSwapChain();
-    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
-        createColorResources();
-    }
-    if (config_.enableDepthBuffer) {
-        createDepthResources();
-    }
-    createFramebuffers();
-
-    FINEVK_DEBUG(LogCategory::Core, "Swap chain recreated: " +
-        std::to_string(swapChain_->extent().width) + "x" +
-        std::to_string(swapChain_->extent().height));
-}
-
-void SimpleRenderer::cleanupSwapChain() {
-    framebuffers_.reset();
-    colorView_.reset();
-    colorImage_.reset();
-    depthView_.reset();
-    depthImage_.reset();
-    swapChain_.reset();
+void SimpleRenderer::onResize() {
+    recreateResources();
 }
 
 void SimpleRenderer::waitIdle() {
-    vkDeviceWaitIdle(device_->handle());
+    if (device()) {
+        device()->waitIdle();
+    }
 }
 
 Sampler* SimpleRenderer::defaultSampler() {
     if (!defaultSampler_) {
-        auto builder = Sampler::create(device_.get())
+        auto* physDevice = device()->physicalDevice();
+
+        auto builder = Sampler::create(device())
             .filter(VK_FILTER_LINEAR, VK_FILTER_LINEAR)
             .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
             .addressMode(VK_SAMPLER_ADDRESS_MODE_REPEAT)
             .mipLod(0.0f, VK_LOD_CLAMP_NONE);
 
         // Only enable anisotropy if the feature was enabled on the device
-        if (physicalDevice_.capabilities().supportsAnisotropy()) {
-            float maxAnisotropy = physicalDevice_.capabilities().properties.limits.maxSamplerAnisotropy;
+        if (physDevice->capabilities().supportsAnisotropy()) {
+            float maxAnisotropy = physDevice->capabilities().properties.limits.maxSamplerAnisotropy;
             builder.anisotropy(maxAnisotropy);
         }
 
@@ -399,9 +412,16 @@ Sampler* SimpleRenderer::defaultSampler() {
 }
 
 SimpleRenderer::~SimpleRenderer() {
-    if (device_) {
-        vkDeviceWaitIdle(device_->handle());
+    auto* dev = device();
+    if (dev) {
+        // Unregister from device destruction notifications
+        if (deviceDestructionCallbackId_ != 0) {
+            dev->removeDestructionCallback(deviceDestructionCallbackId_);
+            deviceDestructionCallbackId_ = 0;
+        }
+        dev->waitIdle();
     }
+    // Resources will be cleaned up by their destructors
 }
 
 } // namespace finevk

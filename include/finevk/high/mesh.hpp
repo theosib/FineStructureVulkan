@@ -70,8 +70,26 @@ public:
 
     /// Create a mesh builder
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device);
+    static Builder create(const LogicalDevicePtr& device);
 
-    /// Load mesh from OBJ file
+    /**
+     * @brief Load mesh from OBJ file using builder pattern
+     *
+     * This is the preferred API for loading meshes. Use .attributes() to specify
+     * which vertex data to load.
+     *
+     * @code
+     * auto mesh = Mesh::load(device, commandPool, "model.obj")
+     *     .attributes(VertexAttribute::Position | VertexAttribute::Normal | VertexAttribute::TexCoord)
+     *     .build();
+     * @endcode
+     */
+    static Builder load(LogicalDevice* device, CommandPool* commandPool, const std::string& path);
+    static Builder load(LogicalDevice& device, CommandPool& commandPool, const std::string& path);
+    static Builder load(const LogicalDevicePtr& device, CommandPool* commandPool, const std::string& path);
+
+    /// Load mesh from OBJ file (legacy API - prefer Mesh::load().build())
     static MeshRef fromOBJ(
         LogicalDevice* device,
         const std::string& path,
@@ -79,6 +97,14 @@ public:
         VertexAttribute attrs = VertexAttribute::Position |
                                VertexAttribute::Normal |
                                VertexAttribute::TexCoord);
+    static MeshRef fromOBJ(LogicalDevice& device, const std::string& path, CommandPool& commandPool,
+        VertexAttribute attrs = VertexAttribute::Position | VertexAttribute::Normal | VertexAttribute::TexCoord) {
+        return fromOBJ(&device, path, &commandPool, attrs);
+    }
+    static MeshRef fromOBJ(const LogicalDevicePtr& device, const std::string& path, CommandPool* commandPool,
+        VertexAttribute attrs = VertexAttribute::Position | VertexAttribute::Normal | VertexAttribute::TexCoord) {
+        return fromOBJ(device.get(), path, commandPool, attrs);
+    }
 
     /// Get vertex buffer
     Buffer* vertexBuffer() const { return vertexBuffer_.get(); }
@@ -180,14 +206,26 @@ public:
     /// Get index count
     size_t indexCount() const { return indices_.size(); }
 
-    /// Build the mesh and upload to GPU
-    MeshRef build(CommandPool* commandPool);
+    /**
+     * @brief Build the mesh and upload to GPU
+     *
+     * If constructed via Mesh::load(), commandPool parameter is optional (already provided).
+     * If constructed via Mesh::create(), commandPool is required.
+     */
+    MeshRef build(CommandPool* commandPool = nullptr);
+    MeshRef build(CommandPool& commandPool) { return build(&commandPool); }
 
 private:
+    friend class Mesh;
+    Builder(LogicalDevice* device, CommandPool* commandPool, const std::string& path);
+
     void packVertexData(std::vector<float>& packed) const;
     void calculateBounds(glm::vec3& minBounds, glm::vec3& maxBounds) const;
+    void loadOBJ(const std::string& path);
 
     LogicalDevice* device_;
+    CommandPool* commandPool_ = nullptr;  // For load() path
+    std::string loadPath_;                 // For deferred loading
     VertexAttribute attrs_ = VertexAttribute::Position |
                             VertexAttribute::Normal |
                             VertexAttribute::TexCoord;
@@ -200,6 +238,17 @@ private:
     // For deduplication
     std::unordered_map<size_t, uint32_t> vertexMap_;
 };
+
+// Inline overloads (defined after Builder is complete)
+inline Mesh::Builder Mesh::create(LogicalDevice& device) { return create(&device); }
+inline Mesh::Builder Mesh::create(const LogicalDevicePtr& device) { return create(device.get()); }
+
+inline Mesh::Builder Mesh::load(LogicalDevice& device, CommandPool& commandPool, const std::string& path) {
+    return load(&device, &commandPool, path);
+}
+inline Mesh::Builder Mesh::load(const LogicalDevicePtr& device, CommandPool* commandPool, const std::string& path) {
+    return load(device.get(), commandPool, path);
+}
 
 } // namespace finevk
 

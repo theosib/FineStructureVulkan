@@ -1,7 +1,7 @@
 #pragma once
 
 #include "finevk/core/types.hpp"
-#include "finevk/device/physical_device.hpp"
+#include "finevk/window/window.hpp"
 #include "finevk/high/mesh.hpp"
 #include "finevk/high/uniform_buffer.hpp"
 
@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <optional>
 
 namespace finevk {
 
@@ -22,7 +23,6 @@ class RenderPass;
 class GraphicsPipeline;
 class CommandPool;
 class CommandBuffer;
-class FrameSyncObjects;
 class SwapChainFramebuffers;
 class DescriptorSetLayout;
 class DescriptorPool;
@@ -47,11 +47,6 @@ enum class MSAALevel {
  * @brief Configuration for SimpleRenderer
  */
 struct RendererConfig {
-    uint32_t width = 800;
-    uint32_t height = 600;
-    uint32_t framesInFlight = 2;
-    bool vsync = true;
-    bool enableValidation = true;
     bool enableDepthBuffer = true;
     MSAALevel msaa = MSAALevel::Off;  // Default: no MSAA for maximum compatibility
 };
@@ -70,44 +65,69 @@ struct FrameBeginResult {
  * @brief High-level rendering facade
  *
  * SimpleRenderer provides a simplified interface for common rendering tasks,
- * managing the swap chain, render pass, synchronization, and frame lifecycle.
- * It's designed for quick prototyping and simple applications.
+ * managing render pass, framebuffers, and frame lifecycle. It uses Window
+ * internally for swap chain and synchronization management.
  *
  * For more complex scenarios, use the lower-level components directly.
+ *
+ * Usage:
+ * @code
+ * auto window = Window::create(instance).title("My App").size(800, 600).build();
+ * auto physicalDevice = instance->selectPhysicalDevice(window);
+ * auto device = physicalDevice.createLogicalDevice().surface(window->surface()).build();
+ * window->bindDevice(device);
+ *
+ * auto renderer = SimpleRenderer::create(window, device);
+ *
+ * while (window->isOpen()) {
+ *     window->pollEvents();
+ *     auto result = renderer->beginFrame();
+ *     if (result.success) {
+ *         renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
+ *         // Draw...
+ *         renderer->endRenderPass();
+ *         renderer->endFrame();
+ *     }
+ * }
+ * @endcode
  */
 class SimpleRenderer {
 public:
     /**
-     * @brief Create a simple renderer
-     * @param instance Vulkan instance
-     * @param surface Window surface
-     * @param config Renderer configuration
+     * @brief Create a simple renderer using a Window
+     * @param window Window with bound device
+     * @param config Renderer configuration (MSAA, depth buffer)
      */
     static std::unique_ptr<SimpleRenderer> create(
-        Instance* instance,
-        Surface* surface,
+        Window* window,
         const RendererConfig& config = {});
+    static std::unique_ptr<SimpleRenderer> create(
+        Window& window,
+        const RendererConfig& config = {}) { return create(&window, config); }
+    static std::unique_ptr<SimpleRenderer> create(
+        const WindowPtr& window,
+        const RendererConfig& config = {}) { return create(window.get(), config); }
+
+    /// Get the window
+    Window* window() const { return window_; }
 
     /// Get the logical device
-    LogicalDevice* device() const { return device_.get(); }
+    LogicalDevice* device() const;
 
-    /// Get the physical device
-    const PhysicalDevice* physicalDevice() const { return &physicalDevice_; }
-
-    /// Get the swap chain
-    SwapChain* swapChain() const { return swapChain_.get(); }
+    /// Get the swap chain (from window)
+    SwapChain* swapChain() const;
 
     /// Get the render pass
     RenderPass* renderPass() const { return renderPass_.get(); }
 
-    /// Get the command pool
-    CommandPool* commandPool() const { return commandPool_.get(); }
+    /// Get the command pool (device's default pool)
+    CommandPool* commandPool() const { return commandPool_; }
 
     /// Get frames in flight count
-    uint32_t framesInFlight() const { return config_.framesInFlight; }
+    uint32_t framesInFlight() const;
 
     /// Get current frame index (0 to framesInFlight-1)
-    uint32_t currentFrame() const { return currentFrame_; }
+    uint32_t currentFrame() const;
 
     /// Get swap chain extent
     VkExtent2D extent() const;
@@ -160,11 +180,12 @@ public:
     bool endFrame();
 
     /**
-     * @brief Handle window resize
-     * @param width New width
-     * @param height New height
+     * @brief Recreate framebuffers after resize
+     *
+     * Called automatically when Window detects resize. Can also be
+     * called manually if needed.
      */
-    void resize(uint32_t width, uint32_t height);
+    void onResize();
 
     /**
      * @brief Wait for device idle
@@ -194,30 +215,24 @@ public:
 private:
     SimpleRenderer() = default;
 
-    void createSwapChain();
     void createRenderPass();
     void createColorResources();
     void createDepthResources();
     void createFramebuffers();
-    void createSyncObjects();
-    void recreateSwapChain();
-    void cleanupSwapChain();
+    void recreateResources();
+    void cleanupResources();
     VkSampleCountFlagBits selectMsaaSamples(MSAALevel level);
 
     // Configuration
     RendererConfig config_;
-    Instance* instance_ = nullptr;
-    Surface* surface_ = nullptr;
+    Window* window_ = nullptr;  // Non-owning reference to Window
 
-    // Core objects - SimpleRenderer owns the PhysicalDevice by value to ensure
-    // it outlives the LogicalDevice which holds a pointer to it
-    PhysicalDevice physicalDevice_;
-    LogicalDevicePtr device_;
-    SwapChainPtr swapChain_;
+    // Core objects owned by SimpleRenderer
     RenderPassPtr renderPass_;
-    CommandPoolPtr commandPool_;
-    std::unique_ptr<FrameSyncObjects> syncObjects_;
     std::unique_ptr<SwapChainFramebuffers> framebuffers_;
+
+    // Non-owning reference to device's default command pool
+    CommandPool* commandPool_ = nullptr;
 
     // MSAA
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
@@ -230,13 +245,16 @@ private:
     ImageViewPtr depthView_;
 
     // Frame state
-    uint32_t currentFrame_ = 0;
     uint32_t currentImageIndex_ = 0;
     std::vector<CommandBufferPtr> commandBuffers_;
     bool frameInProgress_ = false;
+    std::optional<FrameInfo> currentFrameInfo_;
 
     // Default resources
     SamplerPtr defaultSampler_;
+
+    // Device destruction callback registration
+    size_t deviceDestructionCallbackId_ = 0;
 };
 
 } // namespace finevk

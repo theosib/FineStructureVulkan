@@ -131,30 +131,110 @@ config.msaa = finevk::MSAALevel::Ultra;   // 16x - Maximum (rare)
 
 MSAA resolve happens automatically in the render pass.
 
+### Using the Window API (Recommended for Custom Rendering)
+
+The Window class abstracts GLFW and manages the swap chain automatically:
+
+```cpp
+// Create Vulkan instance
+auto instance = finevk::Instance::create()
+    .applicationName("My App")
+    .enableValidation(true)
+    .build();
+
+// Create window - GLFW is handled internally
+auto window = finevk::Window::create(instance.get())
+    .title("My Window")
+    .size(1280, 720)
+    .resizable(true)
+    .build();
+
+// Select GPU and create device
+auto gpu = instance->selectPhysicalDevice(window.get());
+auto device = gpu.createLogicalDevice()
+    .surface(window->surface())
+    .enableAnisotropy()
+    .build();
+
+// Bind device to window - creates swap chain and sync objects
+window->bindDevice(device);
+
+// Main loop
+while (window->isOpen()) {
+    window->pollEvents();
+
+    if (auto frame = window->beginFrame()) {
+        // frame->imageIndex - which swap chain image to render to
+        // frame->frameIndex - which frame-in-flight (for per-frame resources)
+        // frame->imageAvailable - semaphore signaled when image is ready
+        // frame->renderFinished - semaphore to signal when rendering done
+        // frame->inFlightFence - fence for CPU-GPU synchronization
+
+        // Record and submit your command buffer here...
+        // (wait on imageAvailable, signal renderFinished, signal inFlightFence)
+
+        window->endFrame();  // Presents the image
+    }
+}
+
+window->waitIdle();
+```
+
+**Window Features:**
+- Automatic GLFW window creation and management
+- Automatic swap chain creation and recreation on resize
+- Per-frame synchronization objects (semaphores + fences)
+- Keyboard and mouse event callbacks or polling
+- No direct GLFW dependency in your code
+
+**Event Handling:**
+```cpp
+// Callback style
+window->onKey([](finevk::Key key, finevk::Action action, finevk::Modifier mods) {
+    if (key == finevk::Key::Escape && action == finevk::Action::Press)
+        // handle escape
+});
+
+window->onMouseMove([](double x, double y) { /* handle */ });
+window->onScroll([](double xoff, double yoff) { /* handle */ });
+
+// Polling style
+if (window->isKeyPressed(finevk::Key::W)) { /* move forward */ }
+auto [mx, my] = window->mousePosition();
+```
+
 ### Manual Setup (Advanced)
 
-For custom configurations:
+For full control without the Window abstraction:
 
 ```cpp
 // Create instance with extensions
-auto instance = finevk::Instance::Builder()
+auto instance = finevk::Instance::create()
     .applicationName("My Engine")
     .applicationVersion(1, 0, 0)
     .enableValidation()
     .build();
 
-// Create window and surface
-GLFWwindow* window = glfwCreateWindow(800, 600, "Window", nullptr, nullptr);
-auto surface = finevk::GLFWSurface::create(instance.get(), window);
+// Create GLFW window and surface manually
+glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+GLFWwindow* glfwWindow = glfwCreateWindow(800, 600, "Window", nullptr, nullptr);
+auto surface = instance->createSurface(glfwWindow);
 
 // Select and create device
-auto physicalDevice = finevk::PhysicalDevice::selectBest(instance.get(), surface.get());
+auto physicalDevice = instance->selectPhysicalDevice(surface.get());
 auto device = physicalDevice.createLogicalDevice()
-    .surface(surface.get())
-    .addExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+    .surface(surface)  // No .get() needed!
     .enableAnisotropy()
     .build();
+
+// Create swap chain manually
+auto swapChain = finevk::SwapChain::create(device, surface)  // No .get() needed!
+    .vsync(true)
+    .imageCount(3)
+    .build();
 ```
+
+**Note:** All factory methods and constructors now accept references, pointers, or smart pointers directly - no `.get()` calls required.
 
 ---
 

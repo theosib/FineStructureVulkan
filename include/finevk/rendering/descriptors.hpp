@@ -55,12 +55,17 @@ public:
 
     /// Create a builder for a descriptor set layout
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Get the Vulkan descriptor set layout handle
     VkDescriptorSetLayout handle() const { return layout_; }
 
     /// Get the owning device
     LogicalDevice* device() const { return device_; }
+
+    /// Get bindings for this layout (for pool auto-sizing)
+    const std::vector<VkDescriptorSetLayoutBinding>& bindings() const { return bindings_; }
 
     /// Destructor
     ~DescriptorSetLayout();
@@ -81,6 +86,7 @@ private:
 
     LogicalDevice* device_ = nullptr;
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSetLayoutBinding> bindings_;  // Store for pool auto-sizing
 };
 
 /**
@@ -116,6 +122,18 @@ public:
 
     /// Create a builder for a descriptor pool
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
+
+    /**
+     * @brief Create a descriptor pool from a layout with auto-calculated pool sizes
+     * @param layout Descriptor set layout to base pool sizes on
+     * @param maxSets Maximum number of descriptor sets to allocate
+     * @return Builder pre-configured with pool sizes from the layout
+     */
+    static Builder fromLayout(DescriptorSetLayout* layout, uint32_t maxSets);
+    static Builder fromLayout(DescriptorSetLayout& layout, uint32_t maxSets) { return fromLayout(&layout, maxSets); }
+    static Builder fromLayout(const DescriptorSetLayoutPtr& layout, uint32_t maxSets) { return fromLayout(layout.get(), maxSets); }
 
     /// Get the Vulkan descriptor pool handle
     VkDescriptorPool handle() const { return pool_; }
@@ -125,9 +143,13 @@ public:
 
     /// Allocate a single descriptor set
     VkDescriptorSet allocate(DescriptorSetLayout* layout);
+    VkDescriptorSet allocate(DescriptorSetLayout& layout) { return allocate(&layout); }
+    VkDescriptorSet allocate(const DescriptorSetLayoutPtr& layout) { return allocate(layout.get()); }
 
     /// Allocate multiple descriptor sets with the same layout
     std::vector<VkDescriptorSet> allocate(DescriptorSetLayout* layout, uint32_t count);
+    std::vector<VkDescriptorSet> allocate(DescriptorSetLayout& layout, uint32_t count) { return allocate(&layout, count); }
+    std::vector<VkDescriptorSet> allocate(const DescriptorSetLayoutPtr& layout, uint32_t count) { return allocate(layout.get(), count); }
 
     /// Allocate descriptor sets with different layouts
     std::vector<VkDescriptorSet> allocate(const std::vector<DescriptorSetLayout*>& layouts);
@@ -165,6 +187,8 @@ private:
 class DescriptorWriter {
 public:
     explicit DescriptorWriter(LogicalDevice* device);
+    explicit DescriptorWriter(LogicalDevice& device) : DescriptorWriter(&device) {}
+    explicit DescriptorWriter(const LogicalDevicePtr& device) : DescriptorWriter(device.get()) {}
 
     /// Write a buffer to a descriptor set
     DescriptorWriter& writeBuffer(VkDescriptorSet set, uint32_t binding,

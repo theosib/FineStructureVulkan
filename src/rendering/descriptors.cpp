@@ -8,6 +8,8 @@
 #include "finevk/high/simple_renderer.hpp"
 #include "finevk/core/logging.hpp"
 
+#include <unordered_map>
+
 #include <stdexcept>
 
 namespace finevk {
@@ -70,6 +72,7 @@ DescriptorSetLayoutPtr DescriptorSetLayout::Builder::build() {
     auto layout = DescriptorSetLayoutPtr(new DescriptorSetLayout());
     layout->device_ = device_;
     layout->layout_ = vkLayout;
+    layout->bindings_ = bindings_;  // Store bindings for pool auto-sizing
 
     return layout;
 }
@@ -88,7 +91,8 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 
 DescriptorSetLayout::DescriptorSetLayout(DescriptorSetLayout&& other) noexcept
     : device_(other.device_)
-    , layout_(other.layout_) {
+    , layout_(other.layout_)
+    , bindings_(std::move(other.bindings_)) {
     other.layout_ = VK_NULL_HANDLE;
 }
 
@@ -97,6 +101,7 @@ DescriptorSetLayout& DescriptorSetLayout::operator=(DescriptorSetLayout&& other)
         cleanup();
         device_ = other.device_;
         layout_ = other.layout_;
+        bindings_ = std::move(other.bindings_);
         other.layout_ = VK_NULL_HANDLE;
     }
     return *this;
@@ -164,6 +169,23 @@ DescriptorPoolPtr DescriptorPool::Builder::build() {
 
 DescriptorPool::Builder DescriptorPool::create(LogicalDevice* device) {
     return Builder(device);
+}
+
+DescriptorPool::Builder DescriptorPool::fromLayout(DescriptorSetLayout* layout, uint32_t maxSets) {
+    auto builder = Builder(layout->device()).maxSets(maxSets);
+
+    // Count descriptor types across all bindings
+    std::unordered_map<VkDescriptorType, uint32_t> typeCounts;
+    for (const auto& binding : layout->bindings()) {
+        typeCounts[binding.descriptorType] += binding.descriptorCount * maxSets;
+    }
+
+    // Add pool sizes for each descriptor type
+    for (const auto& [type, count] : typeCounts) {
+        builder.poolSize(type, count);
+    }
+
+    return builder;
 }
 
 DescriptorPool::~DescriptorPool() {

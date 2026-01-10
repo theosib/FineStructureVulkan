@@ -110,6 +110,10 @@ Mesh::Builder Mesh::create(LogicalDevice* device) {
     return Builder(device);
 }
 
+Mesh::Builder Mesh::load(LogicalDevice* device, CommandPool* commandPool, const std::string& path) {
+    return Builder(device, commandPool, path);
+}
+
 MeshRef Mesh::fromOBJ(
     LogicalDevice* device,
     const std::string& path,
@@ -190,6 +194,12 @@ void Mesh::draw(CommandBuffer& cmd, uint32_t instanceCount) const {
 
 Mesh::Builder::Builder(LogicalDevice* device)
     : device_(device) {
+}
+
+Mesh::Builder::Builder(LogicalDevice* device, CommandPool* commandPool, const std::string& path)
+    : device_(device)
+    , commandPool_(commandPool)
+    , loadPath_(path) {
 }
 
 Mesh::Builder& Mesh::Builder::attributes(VertexAttribute attrs) {
@@ -330,9 +340,79 @@ void Mesh::Builder::calculateBounds(glm::vec3& minBounds, glm::vec3& maxBounds) 
     }
 }
 
+void Mesh::Builder::loadOBJ(const std::string& path) {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str())) {
+        throw std::runtime_error("Failed to load OBJ: " + path + " - " + err);
+    }
+
+    // Enable deduplication for loaded meshes
+    deduplicate_ = true;
+
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            Vertex vertex{};
+
+            if (index.vertex_index >= 0) {
+                vertex.position = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+            }
+
+            if (index.normal_index >= 0 && !attrib.normals.empty()) {
+                vertex.normal = {
+                    attrib.normals[3 * index.normal_index + 0],
+                    attrib.normals[3 * index.normal_index + 1],
+                    attrib.normals[3 * index.normal_index + 2]
+                };
+            }
+
+            if (index.texcoord_index >= 0 && !attrib.texcoords.empty()) {
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]  // Flip Y
+                };
+            }
+
+            if (!attrib.colors.empty() && index.vertex_index >= 0) {
+                vertex.color = {
+                    attrib.colors[3 * index.vertex_index + 0],
+                    attrib.colors[3 * index.vertex_index + 1],
+                    attrib.colors[3 * index.vertex_index + 2]
+                };
+            }
+
+            addIndex(addUniqueVertex(vertex));
+        }
+    }
+
+    FINEVK_DEBUG(LogCategory::Core, "Loaded OBJ: " + path +
+        " (" + std::to_string(vertexCount()) + " vertices, " +
+        std::to_string(indexCount()) + " indices)");
+}
+
 MeshRef Mesh::Builder::build(CommandPool* commandPool) {
+    // If we have a deferred load path, load it now
+    if (!loadPath_.empty() && vertices_.empty()) {
+        loadOBJ(loadPath_);
+    }
+
     if (vertices_.empty() || indices_.empty()) {
         throw std::runtime_error("Cannot build empty mesh");
+    }
+
+    // Use provided command pool or fall back to stored one
+    if (!commandPool) {
+        commandPool = commandPool_;
+    }
+    if (!commandPool) {
+        throw std::runtime_error("Command pool required to build mesh");
     }
 
     // Determine index type

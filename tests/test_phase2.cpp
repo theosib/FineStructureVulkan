@@ -266,10 +266,20 @@ void test_image_view_creation() {
     auto texture = Image::createTexture2D(
         ctx.logicalDevice.get(), 128, 128, VK_FORMAT_R8G8B8A8_SRGB);
 
-    auto view = texture->createView();
-    assert(view != nullptr);
-    assert(view->handle() != VK_NULL_HANDLE);
-    assert(view->image() == texture.get());
+    // Test the new view() method (cached default view)
+    auto* defaultView = texture->view();
+    assert(defaultView != nullptr);
+    assert(defaultView->handle() != VK_NULL_HANDLE);
+    assert(defaultView->image() == texture.get());
+
+    // Calling view() again should return the same pointer
+    assert(texture->view() == defaultView);
+
+    // createView() should create a new view (not cached)
+    auto customView = texture->createView(VK_IMAGE_ASPECT_COLOR_BIT);
+    assert(customView != nullptr);
+    assert(customView->handle() != VK_NULL_HANDLE);
+    assert(customView.get() != defaultView);  // Different view object
 
     std::cout << "PASSED\n";
 }

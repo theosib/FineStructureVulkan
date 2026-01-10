@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
+#include <functional>
 
 namespace finevk {
 
@@ -51,8 +52,41 @@ public:
     /// Get the memory allocator
     MemoryAllocator& allocator() { return *allocator_; }
 
+    /**
+     * @brief Get the default command pool
+     *
+     * Returns a shared command pool suitable for general-purpose graphics commands.
+     * The pool is created lazily on first access and cached. It uses the graphics
+     * queue family with the Resettable flag.
+     *
+     * For most use cases, this default pool is sufficient. Create custom pools only
+     * when you need specific flags (e.g., Transient) or per-thread pools.
+     *
+     * @return Raw pointer to the default command pool (device-owned)
+     */
+    CommandPool* defaultCommandPool();
+
     /// Wait for device to become idle
     void waitIdle();
+
+    /**
+     * @brief Register a callback to be called before device destruction
+     *
+     * This allows dependent objects to clean up their device resources before
+     * the device is destroyed. The callback receives a pointer to the device
+     * being destroyed. The ID returned can be used to unregister.
+     *
+     * @param callback Function to call before destruction
+     * @return Registration ID for unregistering
+     */
+    using DestructionCallback = std::function<void(LogicalDevice*)>;
+    size_t onDestruction(DestructionCallback callback);
+
+    /**
+     * @brief Unregister a destruction callback
+     * @param id The registration ID returned by onDestruction()
+     */
+    void removeDestructionCallback(size_t id);
 
     /// Destructor
     ~LogicalDevice();
@@ -83,6 +117,13 @@ private:
 
     // Memory allocator
     std::unique_ptr<MemoryAllocator> allocator_;
+
+    // Default resources (lazily created)
+    CommandPoolPtr defaultCommandPool_;
+
+    // Destruction callbacks for dependent objects
+    std::vector<std::pair<size_t, DestructionCallback>> destructionCallbacks_;
+    size_t nextCallbackId_ = 1;
 };
 
 /**

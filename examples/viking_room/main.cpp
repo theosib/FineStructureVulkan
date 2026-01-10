@@ -3,6 +3,7 @@
  * @brief Viking Room example - demonstrates MSAA with textured 3D model
  *
  * This example demonstrates the current state of FineStructure's high-level API:
+ * - Window API for platform abstraction
  * - SimpleRenderer with MSAA enabled
  * - OBJ model loading
  * - Texture loading with mipmaps
@@ -11,13 +12,10 @@
  * NOTE: This example still requires explicit descriptor/pipeline setup.
  * Future improvements (tracked in design doc):
  * - Material class for automatic descriptor management
- * - Window management integration
  * - Pipeline creation from SimpleRenderer
  */
 
 #include <finevk/finevk.hpp>
-
-#include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -33,20 +31,6 @@ int main() {
     std::cout << "FineStructure Vulkan - Viking Room MSAA Demo\n\n";
 
     try {
-        // Initialize GLFW
-        if (!glfwInit()) {
-            throw std::runtime_error("Failed to initialize GLFW");
-        }
-
-        // Create window
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-        GLFWwindow* window = glfwCreateWindow(1280, 720, "Viking Room - MSAA Demo", nullptr, nullptr);
-        if (!window) {
-            glfwTerminate();
-            throw std::runtime_error("Failed to create window");
-        }
-
         // Create Vulkan instance
         auto instance = Instance::create()
             .applicationName("Viking Room")
@@ -54,19 +38,37 @@ int main() {
             .enableValidation(true)
             .build();
 
-        // Create surface
-        auto surface = instance->createSurface(window);
+        // Create window using Window API (replaces manual GLFW setup)
+        auto window = Window::create(instance)
+            .title("Viking Room - MSAA Demo")
+            .size(1280, 720)
+            .resizable(true)
+            .vsync(true)
+            .build();
+
+        std::cout << "Window created.\n";
+
+        // Select physical device
+        auto physicalDevice = instance->selectPhysicalDevice(window);
+        std::cout << "Selected GPU: " << physicalDevice.name() << "\n";
+
+        // Create logical device
+        auto device = physicalDevice.createLogicalDevice()
+            .surface(window->surface())
+            .enableAnisotropy()
+            .build();
+
+        // Bind device to window (creates swap chain and sync objects)
+        window->bindDevice(device);
+
+        std::cout << "Device bound to window.\n";
 
         // Create renderer with 4x MSAA
         RendererConfig config{};
-        config.width = 1280;
-        config.height = 720;
-        config.framesInFlight = 2;
-        config.vsync = true;
         config.enableDepthBuffer = true;
         config.msaa = MSAALevel::Medium;  // 4x MSAA
 
-        auto renderer = SimpleRenderer::create(instance.get(), surface.get(), config);
+        auto renderer = SimpleRenderer::create(window, config);
 
         std::cout << "Renderer created with " << static_cast<int>(renderer->msaaSamples())
                   << "x MSAA\n";
@@ -111,7 +113,7 @@ int main() {
 
         // Allocate descriptor sets
         auto descriptorSets = descriptorPool->allocate(
-            descriptorLayout.get(),
+            descriptorLayout,
             renderer->framesInFlight());
 
         // Write descriptor sets
@@ -150,9 +152,9 @@ int main() {
         auto pipelineBuilder = GraphicsPipeline::create(
             renderer->device(),
             renderer->renderPass(),
-            pipelineLayout.get())
-            .vertexShader(vertShader.get())
-            .fragmentShader(fragShader.get())
+            pipelineLayout)
+            .vertexShader(vertShader)
+            .fragmentShader(fragShader)
             .vertexBinding(binding.binding, binding.stride, binding.inputRate)
             .depthTest(true)
             .depthWrite(true)
@@ -172,20 +174,16 @@ int main() {
 
         auto startTime = std::chrono::high_resolution_clock::now();
 
-        // Main loop
-        while (!glfwWindowShouldClose(window)) {
-            glfwPollEvents();
-
-            // Handle resize
-            int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
-            if (width > 0 && height > 0) {
-                auto extent = renderer->extent();
-                if (extent.width != static_cast<uint32_t>(width) ||
-                    extent.height != static_cast<uint32_t>(height)) {
-                    renderer->resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-                }
+        // Set up escape key to close window
+        window->onKey([&window](Key key, Action action, Modifier) {
+            if (key == GLFW_KEY_ESCAPE && action == Action::Press) {
+                window->close();
             }
+        });
+
+        // Main loop using Window API
+        while (window->isOpen()) {
+            window->pollEvents();
 
             // Begin frame
             auto result = renderer->beginFrame();
@@ -225,15 +223,13 @@ int main() {
             renderer->endFrame();
         }
 
-        // Cleanup happens automatically via destructors
-        renderer->waitIdle();
+        // Wait for GPU to finish before resources are destroyed
+        device->waitIdle();
 
-        glfwDestroyWindow(window);
-        glfwTerminate();
+        std::cout << "\nCleanup complete.\n";
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
-        glfwTerminate();
         return 1;
     }
 

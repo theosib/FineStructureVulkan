@@ -3,6 +3,9 @@
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/image.hpp"
 #include "finevk/rendering/pipeline.hpp"
+#include "finevk/rendering/render_target.hpp"
+#include "finevk/rendering/renderpass.hpp"
+#include "finevk/rendering/framebuffer.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <stdexcept>
@@ -288,6 +291,39 @@ void CommandBuffer::beginRenderPass(
     renderPassInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(buffer_, &renderPassInfo, contents);
+}
+
+void CommandBuffer::beginRenderPass(
+    RenderTarget& renderTarget,
+    const glm::vec4& clearColor,
+    float clearDepth) {
+
+    // Build clear values
+    std::vector<VkClearValue> clearValues;
+
+    // Color clear
+    VkClearValue colorClear{};
+    colorClear.color = {{clearColor.r, clearColor.g, clearColor.b, clearColor.a}};
+    clearValues.push_back(colorClear);
+
+    // Depth clear if render target has depth
+    if (renderTarget.hasDepth()) {
+        VkClearValue depthClear{};
+        depthClear.depthStencil = {clearDepth, 0};
+        clearValues.push_back(depthClear);
+    }
+
+    // Get render area from render target extent
+    VkRect2D renderArea{};
+    renderArea.offset = {0, 0};
+    renderArea.extent = renderTarget.extent();
+
+    // Begin render pass
+    beginRenderPass(
+        renderTarget.renderPass()->handle(),
+        renderTarget.currentFramebuffer()->handle(),
+        renderArea,
+        clearValues);
 }
 
 void CommandBuffer::endRenderPass() {

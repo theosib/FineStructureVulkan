@@ -1,9 +1,11 @@
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/physical_device.hpp"
 #include "finevk/device/memory.hpp"
+#include "finevk/device/command.hpp"
 #include "finevk/core/surface.hpp"
 #include "finevk/core/logging.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <set>
 
@@ -82,7 +84,8 @@ LogicalDevice::LogicalDevice(LogicalDevice&& other) noexcept
     , presentQueue_(other.presentQueue_)
     , computeQueue_(other.computeQueue_)
     , transferQueue_(other.transferQueue_)
-    , allocator_(std::move(other.allocator_)) {
+    , allocator_(std::move(other.allocator_))
+    , defaultCommandPool_(std::move(other.defaultCommandPool_)) {
     other.device_ = VK_NULL_HANDLE;
     other.graphicsQueue_ = nullptr;
     other.presentQueue_ = nullptr;
@@ -101,6 +104,7 @@ LogicalDevice& LogicalDevice::operator=(LogicalDevice&& other) noexcept {
         computeQueue_ = other.computeQueue_;
         transferQueue_ = other.transferQueue_;
         allocator_ = std::move(other.allocator_);
+        defaultCommandPool_ = std::move(other.defaultCommandPool_);
         other.device_ = VK_NULL_HANDLE;
         other.graphicsQueue_ = nullptr;
         other.presentQueue_ = nullptr;
@@ -110,9 +114,35 @@ LogicalDevice& LogicalDevice::operator=(LogicalDevice&& other) noexcept {
     return *this;
 }
 
+size_t LogicalDevice::onDestruction(DestructionCallback callback) {
+    size_t id = nextCallbackId_++;
+    destructionCallbacks_.emplace_back(id, std::move(callback));
+    return id;
+}
+
+void LogicalDevice::removeDestructionCallback(size_t id) {
+    destructionCallbacks_.erase(
+        std::remove_if(destructionCallbacks_.begin(), destructionCallbacks_.end(),
+            [id](const auto& pair) { return pair.first == id; }),
+        destructionCallbacks_.end());
+}
+
 void LogicalDevice::cleanup() {
     if (device_ != VK_NULL_HANDLE) {
+        // Wait for all GPU work to complete FIRST
+        // This ensures any in-flight commands are done before we destroy anything
         waitIdle();
+
+        // Notify all dependents so they can release their device resources
+        for (auto& [id, callback] : destructionCallbacks_) {
+            if (callback) {
+                callback(this);
+            }
+        }
+        destructionCallbacks_.clear();
+
+        // Clear default resources
+        defaultCommandPool_.reset();
 
         // Clear allocator before destroying device
         allocator_.reset();
@@ -131,6 +161,17 @@ void LogicalDevice::waitIdle() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
     }
+}
+
+CommandPool* LogicalDevice::defaultCommandPool() {
+    if (!defaultCommandPool_) {
+        defaultCommandPool_ = std::make_unique<CommandPool>(
+            this,
+            graphicsQueue_,
+            CommandPoolFlags::Resettable);
+        FINEVK_DEBUG(LogCategory::Core, "Default command pool created");
+    }
+    return defaultCommandPool_.get();
 }
 
 // ============================================================================

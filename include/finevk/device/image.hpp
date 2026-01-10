@@ -64,6 +64,8 @@ public:
 
     /// Create a builder for an image
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Create a 2D texture image
     static ImagePtr createTexture2D(
@@ -71,12 +73,24 @@ public:
         uint32_t width, uint32_t height,
         VkFormat format,
         uint32_t mipLevels = 1);
+    static ImagePtr createTexture2D(LogicalDevice& device, uint32_t width, uint32_t height, VkFormat format, uint32_t mipLevels = 1) {
+        return createTexture2D(&device, width, height, format, mipLevels);
+    }
+    static ImagePtr createTexture2D(const LogicalDevicePtr& device, uint32_t width, uint32_t height, VkFormat format, uint32_t mipLevels = 1) {
+        return createTexture2D(device.get(), width, height, format, mipLevels);
+    }
 
     /// Create a depth buffer image
     static ImagePtr createDepthBuffer(
         LogicalDevice* device,
         uint32_t width, uint32_t height,
         VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+    static ImagePtr createDepthBuffer(LogicalDevice& device, uint32_t width, uint32_t height, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) {
+        return createDepthBuffer(&device, width, height, samples);
+    }
+    static ImagePtr createDepthBuffer(const LogicalDevicePtr& device, uint32_t width, uint32_t height, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) {
+        return createDepthBuffer(device.get(), width, height, samples);
+    }
 
     /// Create a color attachment image
     static ImagePtr createColorAttachment(
@@ -84,6 +98,12 @@ public:
         uint32_t width, uint32_t height,
         VkFormat format,
         VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+    static ImagePtr createColorAttachment(LogicalDevice& device, uint32_t width, uint32_t height, VkFormat format, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) {
+        return createColorAttachment(&device, width, height, format, samples);
+    }
+    static ImagePtr createColorAttachment(const LogicalDevicePtr& device, uint32_t width, uint32_t height, VkFormat format, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) {
+        return createColorAttachment(device.get(), width, height, format, samples);
+    }
 
     /// Get the Vulkan image handle
     VkImage handle() const { return image_; }
@@ -106,8 +126,41 @@ public:
     /// Get number of mip levels
     uint32_t mipLevels() const { return mipLevels_; }
 
-    /// Create an image view for this image
-    ImageViewPtr createView(VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT);
+    /// Get sample count
+    VkSampleCountFlagBits samples() const { return samples_; }
+
+    /**
+     * @brief Get the default view for this image (whole image, matching format)
+     *
+     * The default view is lazily created on first access and cached.
+     * The Image owns this view's lifetime - do not store the returned pointer
+     * beyond the Image's lifetime.
+     *
+     * @return Raw pointer to the default view (owned by Image)
+     */
+    ImageView* view();
+
+    /**
+     * @brief Create a custom view for this image
+     *
+     * Use this for non-default views (partial mip levels, different aspect, etc.)
+     * The returned smart pointer owns the view's lifetime.
+     *
+     * @param aspectMask The aspect mask for the view
+     * @return Smart pointer owning the custom view
+     */
+    ImageViewPtr createView(VkImageAspectFlags aspectMask);
+
+    /**
+     * @brief Create a depth buffer matching this image's dimensions
+     *
+     * @param format Depth format (VK_FORMAT_UNDEFINED for auto-select)
+     * @param samples Sample count (defaults to this image's sample count)
+     * @return New depth buffer image
+     */
+    ImagePtr createMatchingDepthBuffer(
+        VkFormat format = VK_FORMAT_UNDEFINED,
+        VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM);
 
     /// Check if image was created with external memory (e.g., swap chain image)
     bool ownsMemory() const { return ownsMemory_; }
@@ -119,7 +172,7 @@ public:
     Image(const Image&) = delete;
     Image& operator=(const Image&) = delete;
 
-    // Movable
+    // Movable (defaultView_ uses default move semantics via unique_ptr)
     Image(Image&& other) noexcept;
     Image& operator=(Image&& other) noexcept;
 
@@ -138,8 +191,10 @@ private:
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     VkExtent3D extent_ = {0, 0, 0};
     uint32_t mipLevels_ = 1;
+    VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
     AllocationInfo allocation_;
     bool ownsMemory_ = true;
+    ImageViewPtr defaultView_;  // Cached default view, created on first access
 };
 
 /**

@@ -30,6 +30,9 @@ class Fence;
 class Sampler;
 class Texture;
 class Mesh;
+class Window;
+class RenderTarget;
+class Material;
 
 // Smart pointer typedefs for ownership
 using InstancePtr = std::unique_ptr<Instance>;
@@ -53,6 +56,10 @@ using DescriptorPoolPtr = std::unique_ptr<DescriptorPool>;
 using SemaphorePtr = std::unique_ptr<Semaphore>;
 using FencePtr = std::unique_ptr<Fence>;
 using SamplerPtr = std::unique_ptr<Sampler>;
+using WindowPtr = std::unique_ptr<Window>;
+using RenderTargetPtr = std::unique_ptr<RenderTarget>;
+using MaterialPtr = std::unique_ptr<Material>;
+using TexturePtr = std::unique_ptr<Texture>;
 
 // Shared pointer typedefs for shared resources
 using TextureRef = std::shared_ptr<Texture>;

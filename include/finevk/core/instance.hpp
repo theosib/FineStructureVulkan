@@ -16,6 +16,7 @@ namespace finevk {
 
 class Surface;
 class PhysicalDevice;
+class Window;
 
 /**
  * @brief Vulkan Instance wrapper - the entry point to Vulkan
@@ -90,12 +91,24 @@ public:
     /// Check if validation layers are enabled
     bool validationEnabled() const { return validationEnabled_; }
 
-    /// Create a surface for a GLFW window
+    /// Create a surface for a GLFW window (low-level, prefer createWindow())
     SurfacePtr createSurface(GLFWwindow* window);
 
-    // Note: The following methods will be available after Layer 2 implementation:
-    // - std::vector<PhysicalDevice> enumeratePhysicalDevices();
-    // - PhysicalDevice selectPhysicalDevice(Surface* surface = nullptr);
+    /// Create a window builder (recommended - abstracts platform details)
+    /// Usage: instance->createWindow().title("App").size(800,600).build()
+    WindowPtr createWindow(const char* title, uint32_t width, uint32_t height);
+
+    /// Enumerate all available physical devices
+    std::vector<PhysicalDevice> enumeratePhysicalDevices();
+
+    /// Select the best physical device for rendering
+    /// @param surface Optional surface for present capability check
+    PhysicalDevice selectPhysicalDevice(Surface* surface = nullptr);
+
+    /// Select the best physical device (convenience overload for Window)
+    PhysicalDevice selectPhysicalDevice(Window* window);
+    PhysicalDevice selectPhysicalDevice(Window& window);
+    PhysicalDevice selectPhysicalDevice(const WindowPtr& window);
 
     /// Destructor - cleans up Vulkan instance
     ~Instance();

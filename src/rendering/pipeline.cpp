@@ -1,5 +1,6 @@
 #include "finevk/rendering/pipeline.hpp"
 #include "finevk/rendering/renderpass.hpp"
+#include "finevk/rendering/render_target.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/core/logging.hpp"
 
@@ -283,6 +284,12 @@ GraphicsPipeline::Builder& GraphicsPipeline::Builder::depthBoundsTest(
     return *this;
 }
 
+GraphicsPipeline::Builder& GraphicsPipeline::Builder::enableDepth() {
+    return depthTest(true)
+        .depthWrite(true)
+        .depthCompareOp(VK_COMPARE_OP_LESS);
+}
+
 GraphicsPipeline::Builder& GraphicsPipeline::Builder::blending(bool enable) {
     blendEnable_ = enable;
     return *this;
@@ -298,6 +305,14 @@ GraphicsPipeline::Builder& GraphicsPipeline::Builder::blendMode(
     dstAlphaBlendFactor_ = dstAlpha;
     alphaBlendOp_ = alphaOp;
     return *this;
+}
+
+GraphicsPipeline::Builder& GraphicsPipeline::Builder::alphaBlending() {
+    return blending(true)
+        .blendMode(
+            VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD,
+            VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD
+        );
 }
 
 GraphicsPipeline::Builder& GraphicsPipeline::Builder::dynamicState(VkDynamicState state) {
@@ -434,6 +449,17 @@ GraphicsPipelinePtr GraphicsPipeline::Builder::build() {
 GraphicsPipeline::Builder GraphicsPipeline::create(
     LogicalDevice* device, RenderPass* renderPass, PipelineLayout* layout) {
     return Builder(device, renderPass, layout);
+}
+
+GraphicsPipeline::Builder GraphicsPipeline::create(
+    LogicalDevice* device, RenderTarget* renderTarget, PipelineLayout* layout) {
+    // Create builder with render pass from target
+    auto builder = Builder(device, renderTarget->renderPass(), layout);
+
+    // Auto-configure MSAA from render target
+    builder.samples(renderTarget->msaaSamples());
+
+    return builder;
 }
 
 GraphicsPipeline::~GraphicsPipeline() {

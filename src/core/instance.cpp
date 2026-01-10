@@ -1,6 +1,8 @@
 #include "finevk/core/instance.hpp"
 #include "finevk/core/surface.hpp"
 #include "finevk/core/logging.hpp"
+#include "finevk/window/window.hpp"
+#include "finevk/device/physical_device.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -223,9 +225,31 @@ SurfacePtr Instance::createSurface(GLFWwindow* window) {
     return Surface::fromGLFW(this, window);
 }
 
-// Note: enumeratePhysicalDevices() and selectPhysicalDevice() will be
-// implemented in Layer 2 (src/device/physical_device.cpp) when the
-// PhysicalDevice class is fully defined. They are declared in instance.hpp
-// but compilation is deferred to avoid incomplete type errors.
+WindowPtr Instance::createWindow(const char* title, uint32_t width, uint32_t height) {
+    return Window::create(this)
+        .title(title)
+        .size(width, height)
+        .build();
+}
+
+std::vector<PhysicalDevice> Instance::enumeratePhysicalDevices() {
+    return PhysicalDevice::enumerate(this);
+}
+
+PhysicalDevice Instance::selectPhysicalDevice(Surface* surface) {
+    return PhysicalDevice::selectBest(this, surface);
+}
+
+PhysicalDevice Instance::selectPhysicalDevice(Window* window) {
+    return PhysicalDevice::selectBest(this, window ? window->surface() : nullptr);
+}
+
+PhysicalDevice Instance::selectPhysicalDevice(Window& window) {
+    return PhysicalDevice::selectBest(this, window.surface());
+}
+
+PhysicalDevice Instance::selectPhysicalDevice(const WindowPtr& window) {
+    return selectPhysicalDevice(window.get());
+}
 
 } // namespace finevk

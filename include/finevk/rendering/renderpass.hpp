@@ -79,6 +79,8 @@ public:
 
     /// Create a builder for a render pass
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Create a simple render pass for basic rendering
     static RenderPassPtr createSimple(
@@ -87,6 +89,12 @@ public:
         VkFormat depthFormat = VK_FORMAT_UNDEFINED,
         VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
         bool forPresentation = true);
+    static RenderPassPtr createSimple(LogicalDevice& device, VkFormat colorFormat, VkFormat depthFormat = VK_FORMAT_UNDEFINED, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT, bool forPresentation = true) {
+        return createSimple(&device, colorFormat, depthFormat, samples, forPresentation);
+    }
+    static RenderPassPtr createSimple(const LogicalDevicePtr& device, VkFormat colorFormat, VkFormat depthFormat = VK_FORMAT_UNDEFINED, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT, bool forPresentation = true) {
+        return createSimple(device.get(), colorFormat, depthFormat, samples, forPresentation);
+    }
 
     /// Get the Vulkan render pass handle
     VkRenderPass handle() const { return renderPass_; }

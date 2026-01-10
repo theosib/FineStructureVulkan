@@ -3,6 +3,7 @@
 #include "finevk/core/types.hpp"
 
 #include <vulkan/vulkan.h>
+#include <glm/glm.hpp>
 #include <vector>
 #include <memory>
 
@@ -14,6 +15,7 @@ class Buffer;
 class Image;
 class GraphicsPipeline;
 class PipelineLayout;
+class RenderTarget;
 
 /**
  * @brief Command pool flags
@@ -40,6 +42,12 @@ public:
     /// Create a command pool for a specific queue
     CommandPool(LogicalDevice* device, Queue* queue,
                 CommandPoolFlags flags = CommandPoolFlags::Resettable);
+    CommandPool(LogicalDevice& device, Queue& queue,
+                CommandPoolFlags flags = CommandPoolFlags::Resettable)
+        : CommandPool(&device, &queue, flags) {}
+    CommandPool(const LogicalDevicePtr& device, Queue* queue,
+                CommandPoolFlags flags = CommandPoolFlags::Resettable)
+        : CommandPool(device.get(), queue, flags) {}
 
     /// Get the Vulkan command pool handle
     VkCommandPool handle() const { return pool_; }
@@ -179,6 +187,29 @@ public:
         VkRect2D renderArea,
         const std::vector<VkClearValue>& clearValues,
         VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE);
+
+    /**
+     * @brief Begin render pass using RenderTarget (simplified)
+     *
+     * RenderTarget provides the render pass, framebuffer, and extent.
+     * Clear values are constructed from the provided colors.
+     *
+     * @param renderTarget The render target to render to
+     * @param clearColor Color to clear attachments (RGB + alpha)
+     * @param clearDepth Depth clear value (default: 1.0)
+     */
+    void beginRenderPass(
+        RenderTarget& renderTarget,
+        const glm::vec4& clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+        float clearDepth = 1.0f);
+    void beginRenderPass(RenderTarget* renderTarget, const glm::vec4& clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f), float clearDepth = 1.0f) {
+        beginRenderPass(*renderTarget, clearColor, clearDepth);
+    }
+    template<typename T>
+    void beginRenderPass(const std::unique_ptr<T>& renderTarget, const glm::vec4& clearColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f), float clearDepth = 1.0f) {
+        beginRenderPass(*renderTarget, clearColor, clearDepth);
+    }
+
     void endRenderPass();
     void nextSubpass(VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE);
 

@@ -14,6 +14,61 @@
 
 namespace finevk {
 
+// ============================================================================
+// Texture::Builder implementation
+// ============================================================================
+
+Texture::Builder::Builder(LogicalDevice* device, CommandPool* commandPool, const std::string& path)
+    : device_(device)
+    , commandPool_(commandPool)
+    , sourceType_(SourceType::File)
+    , path_(path)
+    , data_(nullptr)
+    , width_(0)
+    , height_(0) {
+}
+
+Texture::Builder::Builder(LogicalDevice* device, CommandPool* commandPool,
+                         const void* data, uint32_t width, uint32_t height)
+    : device_(device)
+    , commandPool_(commandPool)
+    , sourceType_(SourceType::Memory)
+    , data_(data)
+    , width_(width)
+    , height_(height) {
+}
+
+Texture::Builder& Texture::Builder::generateMipmaps(bool enable) {
+    generateMipmaps_ = enable;
+    return *this;
+}
+
+Texture::Builder& Texture::Builder::srgb(bool enable) {
+    srgb_ = enable;
+    return *this;
+}
+
+TextureRef Texture::Builder::build() {
+    if (sourceType_ == SourceType::File) {
+        return Texture::fromFile(device_, path_, commandPool_, generateMipmaps_, srgb_);
+    } else {
+        return Texture::fromMemory(device_, data_, width_, height_, commandPool_, generateMipmaps_, srgb_);
+    }
+}
+
+Texture::Builder Texture::load(LogicalDevice* device, CommandPool* commandPool, const std::string& path) {
+    return Builder(device, commandPool, path);
+}
+
+Texture::Builder Texture::load(LogicalDevice* device, CommandPool* commandPool,
+                               const void* data, uint32_t width, uint32_t height) {
+    return Builder(device, commandPool, data, width, height);
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
 uint32_t calculateMipLevels(uint32_t width, uint32_t height) {
     return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 }
@@ -194,8 +249,8 @@ TextureRef Texture::fromMemory(
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    // Create image view
-    auto view = image->createView();
+    // Create image view (textures are always color images)
+    auto view = image->createView(VK_IMAGE_ASPECT_COLOR_BIT);
 
     auto texture = TextureRef(new Texture());
     texture->image_ = std::move(image);

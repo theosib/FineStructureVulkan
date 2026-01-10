@@ -4,6 +4,7 @@
 #include "finevk/device/buffer.hpp"
 
 #include <vulkan/vulkan.h>
+#include <glm/glm.hpp>
 #include <memory>
 #include <vector>
 #include <cstring>

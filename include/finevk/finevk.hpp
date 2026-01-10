@@ -9,6 +9,9 @@
 #include "finevk/core/surface.hpp"
 #include "finevk/core/debug.hpp"
 
+// Window Management
+#include "finevk/window/window.hpp"
+
 // Device & Memory Management (Layer 2)
 #include "finevk/device/physical_device.hpp"
 #include "finevk/device/logical_device.hpp"
@@ -25,6 +28,7 @@
 #include "finevk/rendering/pipeline.hpp"
 #include "finevk/rendering/sync.hpp"
 #include "finevk/rendering/descriptors.hpp"
+#include "finevk/rendering/render_target.hpp"
 
 // High-Level Abstractions (Layer 4)
 #include "finevk/high/texture.hpp"
@@ -32,6 +36,7 @@
 #include "finevk/high/uniform_buffer.hpp"
 #include "finevk/high/format_utils.hpp"
 #include "finevk/high/simple_renderer.hpp"
+#include "finevk/high/material.hpp"
 
 // Forward declarations and common types
 #include "finevk/core/types.hpp"

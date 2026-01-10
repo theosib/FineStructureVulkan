@@ -11,6 +11,7 @@ namespace finevk {
 
 class LogicalDevice;
 class RenderPass;
+class RenderTarget;
 
 /**
  * @brief Vulkan shader module wrapper
@@ -18,12 +19,14 @@ class RenderPass;
 class ShaderModule {
 public:
     /// Create from SPIR-V binary data
-    static ShaderModulePtr fromSPIRV(LogicalDevice* device,
-                                     const std::vector<uint32_t>& spirv);
+    static ShaderModulePtr fromSPIRV(LogicalDevice* device, const std::vector<uint32_t>& spirv);
+    static ShaderModulePtr fromSPIRV(LogicalDevice& device, const std::vector<uint32_t>& spirv) { return fromSPIRV(&device, spirv); }
+    static ShaderModulePtr fromSPIRV(const LogicalDevicePtr& device, const std::vector<uint32_t>& spirv) { return fromSPIRV(device.get(), spirv); }
 
     /// Create from SPIR-V file
-    static ShaderModulePtr fromFile(LogicalDevice* device,
-                                    const std::string& path);
+    static ShaderModulePtr fromFile(LogicalDevice* device, const std::string& path);
+    static ShaderModulePtr fromFile(LogicalDevice& device, const std::string& path) { return fromFile(&device, path); }
+    static ShaderModulePtr fromFile(const LogicalDevicePtr& device, const std::string& path) { return fromFile(device.get(), path); }
 
     /// Get the Vulkan shader module handle
     VkShaderModule handle() const { return module_; }
@@ -81,6 +84,8 @@ public:
 
     /// Create a builder for a pipeline layout
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Get the Vulkan pipeline layout handle
     VkPipelineLayout handle() const { return layout_; }
@@ -144,7 +149,11 @@ public:
 
         // Shader stages
         Builder& vertexShader(ShaderModule* module, const char* entryPoint = "main");
+        Builder& vertexShader(ShaderModule& module, const char* entryPoint = "main") { return vertexShader(&module, entryPoint); }
+        Builder& vertexShader(const ShaderModulePtr& module, const char* entryPoint = "main") { return vertexShader(module.get(), entryPoint); }
         Builder& fragmentShader(ShaderModule* module, const char* entryPoint = "main");
+        Builder& fragmentShader(ShaderModule& module, const char* entryPoint = "main") { return fragmentShader(&module, entryPoint); }
+        Builder& fragmentShader(const ShaderModulePtr& module, const char* entryPoint = "main") { return fragmentShader(module.get(), entryPoint); }
 
         // Vertex input
         Builder& vertexBinding(uint32_t binding, uint32_t stride,
@@ -173,12 +182,18 @@ public:
         Builder& depthCompareOp(VkCompareOp op);
         Builder& depthBoundsTest(bool enable, float min, float max);
 
+        /// Convenience: Enable depth testing with standard settings (test + write, LESS op)
+        Builder& enableDepth();
+
         // Blending
         Builder& blending(bool enable);
         Builder& blendMode(VkBlendFactor srcColor, VkBlendFactor dstColor,
                            VkBlendOp colorOp,
                            VkBlendFactor srcAlpha, VkBlendFactor dstAlpha,
                            VkBlendOp alphaOp);
+
+        /// Convenience: Standard alpha blending (src_alpha, 1-src_alpha)
+        Builder& alphaBlending();
 
         // Dynamic state
         Builder& dynamicState(VkDynamicState state);
@@ -240,6 +255,18 @@ public:
 
     /// Create a builder for a graphics pipeline
     static Builder create(LogicalDevice* device, RenderPass* renderPass, PipelineLayout* layout);
+    static Builder create(LogicalDevice& device, RenderPass& renderPass, PipelineLayout& layout) { return create(&device, &renderPass, &layout); }
+    static Builder create(const LogicalDevicePtr& device, const RenderPassPtr& renderPass, const PipelineLayoutPtr& layout) { return create(device.get(), renderPass.get(), layout.get()); }
+    // Mixed overloads for convenience (raw pointers with smart pointer layout)
+    static Builder create(LogicalDevice* device, RenderPass* renderPass, const PipelineLayoutPtr& layout) { return create(device, renderPass, layout.get()); }
+    static Builder create(LogicalDevice* device, RenderPass* renderPass, PipelineLayout& layout) { return create(device, renderPass, &layout); }
+
+    /// Create a builder using RenderTarget (auto-configures MSAA and gets RenderPass)
+    static Builder create(LogicalDevice* device, RenderTarget* renderTarget, PipelineLayout* layout);
+    static Builder create(LogicalDevice& device, RenderTarget& renderTarget, PipelineLayout& layout) { return create(&device, &renderTarget, &layout); }
+    static Builder create(const LogicalDevicePtr& device, const RenderTargetPtr& renderTarget, const PipelineLayoutPtr& layout) { return create(device.get(), renderTarget.get(), layout.get()); }
+    static Builder create(LogicalDevice* device, RenderTarget* renderTarget, const PipelineLayoutPtr& layout) { return create(device, renderTarget, layout.get()); }
+    static Builder create(LogicalDevice* device, RenderTarget* renderTarget, PipelineLayout& layout) { return create(device, renderTarget, &layout); }
 
     /// Get the Vulkan pipeline handle
     VkPipeline handle() const { return pipeline_; }

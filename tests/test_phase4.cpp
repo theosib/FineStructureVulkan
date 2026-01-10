@@ -24,8 +24,7 @@ using namespace finevk;
 // Global test state
 struct TestContext {
     InstancePtr instance;
-    SurfacePtr surface;
-    GLFWwindow* window = nullptr;
+    WindowPtr window;
     PhysicalDevice physicalDevice;
     LogicalDevicePtr logicalDevice;
     CommandPoolPtr commandPool;
@@ -43,27 +42,27 @@ void setup_test_context() {
         .enableValidation(true)
         .build();
 
-    // Create GLFW window (hidden)
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    ctx.window = glfwCreateWindow(800, 600, "Test Window", nullptr, nullptr);
-    assert(ctx.window != nullptr);
-
-    // Create surface
-    ctx.surface = ctx.instance->createSurface(ctx.window);
+    // Create Window (hidden) - this replaces raw GLFW window + surface
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // Make window invisible for tests
+    ctx.window = Window::create(ctx.instance)
+        .title("Test Window")
+        .size(800, 600)
+        .build();
 
     // Select physical device
-    ctx.physicalDevice = PhysicalDevice::selectBest(
-        ctx.instance.get(),
-        ctx.surface.get());
+    ctx.physicalDevice = ctx.instance->selectPhysicalDevice(ctx.window);
 
     std::cout << "  Selected GPU: " << ctx.physicalDevice.name() << "\n";
 
     // Create logical device
     ctx.logicalDevice = ctx.physicalDevice.createLogicalDevice()
-        .surface(ctx.surface.get())
+        .surface(ctx.window->surface())
         .addExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+        .enableAnisotropy()
         .build();
+
+    // Bind device to window (creates swap chain and sync objects)
+    ctx.window->bindDevice(ctx.logicalDevice);
 
     // Create command pool
     ctx.commandPool = std::make_unique<CommandPool>(
@@ -77,15 +76,12 @@ void setup_test_context() {
 void cleanup_test_context() {
     std::cout << "\nCleaning up test context...\n";
 
+    // Order matters! Window owns sync objects and swap chain that depend on device
+    // So clean up command pool first, then window (which cleans up device-dependent resources),
+    // then device, then instance
     ctx.commandPool.reset();
+    ctx.window.reset();  // This cleans up sync objects, swap chain, surface
     ctx.logicalDevice.reset();
-    ctx.surface.reset();
-
-    if (ctx.window) {
-        glfwDestroyWindow(ctx.window);
-        ctx.window = nullptr;
-    }
-
     ctx.instance.reset();
     std::cout << "  Cleanup complete.\n";
 }
@@ -522,24 +518,18 @@ void test_simple_renderer_creation() {
     std::cout << "Test: SimpleRenderer - Creation... ";
 
     RendererConfig config{};
-    config.width = 800;
-    config.height = 600;
-    config.framesInFlight = 2;
-    config.vsync = true;
     config.enableDepthBuffer = true;
 
-    auto renderer = SimpleRenderer::create(
-        ctx.instance.get(),
-        ctx.surface.get(),
-        config);
+    auto renderer = SimpleRenderer::create(ctx.window, config);
 
     assert(renderer != nullptr);
+    assert(renderer->window() == ctx.window.get());
     assert(renderer->device() != nullptr);
     assert(renderer->swapChain() != nullptr);
     assert(renderer->renderPass() != nullptr);
     assert(renderer->commandPool() != nullptr);
-    assert(renderer->framesInFlight() == 2);
-    assert(renderer->currentFrame() == 0);
+    assert(renderer->framesInFlight() == ctx.window->framesInFlight());
+    assert(renderer->currentFrame() == ctx.window->currentFrame());
 
     std::cout << "PASSED\n";
 }
@@ -547,9 +537,7 @@ void test_simple_renderer_creation() {
 void test_simple_renderer_extent() {
     std::cout << "Test: SimpleRenderer - Extent and format... ";
 
-    auto renderer = SimpleRenderer::create(
-        ctx.instance.get(),
-        ctx.surface.get());
+    auto renderer = SimpleRenderer::create(ctx.window);
 
     auto extent = renderer->extent();
     assert(extent.width > 0);
@@ -558,7 +546,7 @@ void test_simple_renderer_extent() {
     auto format = renderer->colorFormat();
     assert(format != VK_FORMAT_UNDEFINED);
 
-    // Depth format should be set if depth buffer enabled
+    // Depth format should be set if depth buffer enabled (default)
     auto depthFormat = renderer->depthFormat();
     assert(depthFormat != VK_FORMAT_UNDEFINED);
     assert(FormatUtils::hasDepth(depthFormat));
@@ -569,9 +557,7 @@ void test_simple_renderer_extent() {
 void test_simple_renderer_default_sampler() {
     std::cout << "Test: SimpleRenderer - Default sampler... ";
 
-    auto renderer = SimpleRenderer::create(
-        ctx.instance.get(),
-        ctx.surface.get());
+    auto renderer = SimpleRenderer::create(ctx.window);
 
     auto* sampler = renderer->defaultSampler();
     assert(sampler != nullptr);
@@ -592,10 +578,7 @@ void test_simple_renderer_msaa() {
         config.msaa = MSAALevel::Off;
         config.enableDepthBuffer = true;
 
-        auto renderer = SimpleRenderer::create(
-            ctx.instance.get(),
-            ctx.surface.get(),
-            config);
+        auto renderer = SimpleRenderer::create(ctx.window, config);
 
         assert(renderer->msaaSamples() == VK_SAMPLE_COUNT_1_BIT);
         assert(renderer->isMsaaEnabled() == false);
@@ -609,10 +592,7 @@ void test_simple_renderer_msaa() {
         config.msaa = MSAALevel::Medium;  // 4x MSAA
         config.enableDepthBuffer = true;
 
-        auto renderer = SimpleRenderer::create(
-            ctx.instance.get(),
-            ctx.surface.get(),
-            config);
+        auto renderer = SimpleRenderer::create(ctx.window, config);
 
         // Should be at least 1x (will be 4x if supported)
         assert(renderer->msaaSamples() >= VK_SAMPLE_COUNT_1_BIT);

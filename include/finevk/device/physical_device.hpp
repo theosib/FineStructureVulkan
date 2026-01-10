@@ -97,6 +97,8 @@ public:
      * @brief Enumerate all available physical devices
      */
     static std::vector<PhysicalDevice> enumerate(Instance* instance);
+    static std::vector<PhysicalDevice> enumerate(Instance& instance) { return enumerate(&instance); }
+    static std::vector<PhysicalDevice> enumerate(const InstancePtr& instance) { return enumerate(instance.get()); }
 
     /**
      * @brief Select the best physical device for rendering
@@ -108,6 +110,18 @@ public:
         Instance* instance,
         Surface* surface = nullptr,
         std::function<int(const DeviceCapabilities&)> scorer = nullptr);
+    static PhysicalDevice selectBest(Instance& instance, Surface* surface = nullptr, std::function<int(const DeviceCapabilities&)> scorer = nullptr) {
+        return selectBest(&instance, surface, scorer);
+    }
+    static PhysicalDevice selectBest(const InstancePtr& instance, Surface* surface = nullptr, std::function<int(const DeviceCapabilities&)> scorer = nullptr) {
+        return selectBest(instance.get(), surface, scorer);
+    }
+    static PhysicalDevice selectBest(Instance* instance, Surface& surface, std::function<int(const DeviceCapabilities&)> scorer = nullptr) {
+        return selectBest(instance, &surface, scorer);
+    }
+    static PhysicalDevice selectBest(const InstancePtr& instance, const SurfacePtr& surface, std::function<int(const DeviceCapabilities&)> scorer = nullptr) {
+        return selectBest(instance.get(), surface.get(), scorer);
+    }
 
     /// Get the Vulkan physical device handle
     VkPhysicalDevice handle() const { return device_; }
@@ -175,6 +189,8 @@ public:
 
     /// Set the surface for present queue selection
     LogicalDeviceBuilder& surface(Surface* surface);
+    LogicalDeviceBuilder& surface(Surface& s) { return surface(&s); }
+    LogicalDeviceBuilder& surface(const SurfacePtr& s) { return surface(s.get()); }
 
     /// Build the logical device
     LogicalDevicePtr build();

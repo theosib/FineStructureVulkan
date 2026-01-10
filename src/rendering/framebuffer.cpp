@@ -107,6 +107,36 @@ void Framebuffer::cleanup() {
 }
 
 // ============================================================================
+// SwapChainFramebuffers::Builder implementation
+// ============================================================================
+
+SwapChainFramebuffers::Builder::Builder(SwapChain* swapChain, RenderPass* renderPass)
+    : swapChain_(swapChain), renderPass_(renderPass) {
+}
+
+SwapChainFramebuffers::Builder& SwapChainFramebuffers::Builder::depthView(ImageView* view) {
+    depthView_ = view;
+    return *this;
+}
+
+SwapChainFramebuffers::Builder& SwapChainFramebuffers::Builder::colorMsaaView(ImageView* view) {
+    colorMsaaView_ = view;
+    return *this;
+}
+
+SwapChainFramebuffers SwapChainFramebuffers::Builder::build() {
+    if (colorMsaaView_) {
+        return SwapChainFramebuffers(swapChain_, renderPass_, colorMsaaView_, depthView_);
+    } else {
+        return SwapChainFramebuffers(swapChain_, renderPass_, depthView_);
+    }
+}
+
+SwapChainFramebuffers::Builder SwapChainFramebuffers::create(SwapChain* swapChain, RenderPass* renderPass) {
+    return Builder(swapChain, renderPass);
+}
+
+// ============================================================================
 // SwapChainFramebuffers implementation
 // ============================================================================
 

@@ -54,12 +54,18 @@ public:
 
     /// Create a builder for a sampler
     static Builder create(LogicalDevice* device);
+    static Builder create(LogicalDevice& device) { return create(&device); }
+    static Builder create(const LogicalDevicePtr& device) { return create(device.get()); }
 
     /// Create a default linear sampler
     static SamplerPtr createLinear(LogicalDevice* device);
+    static SamplerPtr createLinear(LogicalDevice& device) { return createLinear(&device); }
+    static SamplerPtr createLinear(const LogicalDevicePtr& device) { return createLinear(device.get()); }
 
     /// Create a default nearest-neighbor sampler
     static SamplerPtr createNearest(LogicalDevice* device);
+    static SamplerPtr createNearest(LogicalDevice& device) { return createNearest(&device); }
+    static SamplerPtr createNearest(const LogicalDevicePtr& device) { return createNearest(device.get()); }
 
     /// Get the Vulkan sampler handle
     VkSampler handle() const { return sampler_; }
