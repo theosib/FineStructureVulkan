@@ -166,6 +166,8 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/frame_clock.cpp
         src/engine/deferred_disposer.cpp
         src/engine/game_loop.cpp
+        src/engine/camera.cpp
+        src/engine/render_agent.cpp
     )
 
     target_include_directories(finevk-engine PUBLIC

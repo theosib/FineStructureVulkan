@@ -12,11 +12,12 @@
 #include "finevk/engine/frame_clock.hpp"
 #include "finevk/engine/deferred_disposer.hpp"
 #include "finevk/engine/game_loop.hpp"
+#include "finevk/engine/camera.hpp"
+#include "finevk/engine/render_agent.hpp"
 
 namespace finevk {
 
 // Additional engine features will be added here as they are implemented:
-// - RenderAgent system
 // - WorkQueue / UploadQueue
 // - DrawBatcher
 // - CoordinateSystem
