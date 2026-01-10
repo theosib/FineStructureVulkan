@@ -103,11 +103,15 @@ add_library(finevk-core
     src/rendering/pipeline.cpp
     src/rendering/sync.cpp
     src/rendering/descriptors.cpp
+    src/rendering/render_target.cpp
 
     # Layer 4: High-Level Abstractions
     src/high/texture.cpp
     src/high/mesh.cpp
     src/high/simple_renderer.cpp
+
+    # Window
+    src/window/window.cpp
 
     # Platform
     src/platform/glfw_surface.cpp
@@ -150,6 +154,34 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(finevk-core PRIVATE -Wall -Wextra -Wpedantic)
 elseif(MSVC)
     target_compile_options(finevk-core PRIVATE /W4)
+endif()
+
+# =============================================================================
+# Engine library (optional, built on top of core)
+# =============================================================================
+option(FINEVK_BUILD_ENGINE "Build finevk-engine (game utilities)" ON)
+
+if(FINEVK_BUILD_ENGINE)
+    add_library(finevk-engine
+        src/engine/frame_clock.cpp
+        src/engine/deferred_disposer.cpp
+        src/engine/game_loop.cpp
+    )
+
+    target_include_directories(finevk-engine PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    target_link_libraries(finevk-engine PUBLIC finevk-core)
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(finevk-engine PRIVATE -Wall -Wextra -Wpedantic)
+    elseif(MSVC)
+        target_compile_options(finevk-engine PRIVATE /W4)
+    endif()
+
+    message(STATUS "finevk-engine will be built")
 endif()
 
 # =============================================================================
