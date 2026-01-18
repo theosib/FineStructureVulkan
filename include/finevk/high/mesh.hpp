@@ -200,6 +200,17 @@ public:
     /// Add multiple indices
     Builder& addIndices(const std::vector<uint32_t>& indices);
 
+    // --- Bulk Upload Methods ---
+
+    /// Add multiple vertices (bulk upload)
+    Builder& addVertices(const Vertex* data, size_t count);
+
+    /// Add multiple vertices (bulk upload from vector)
+    Builder& addVertices(const std::vector<Vertex>& vertices);
+
+    /// Add multiple indices (bulk upload from pointer)
+    Builder& addIndices(const uint32_t* data, size_t count);
+
     /// Get vertex count
     size_t vertexCount() const { return vertices_.size(); }
 

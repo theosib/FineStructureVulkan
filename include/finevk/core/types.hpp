@@ -33,6 +33,9 @@ class Mesh;
 class Window;
 class RenderTarget;
 class Material;
+class RawMesh;
+class BufferPool;
+class StagingPool;
 
 // Smart pointer typedefs for ownership
 using InstancePtr = std::unique_ptr<Instance>;
@@ -60,10 +63,14 @@ using WindowPtr = std::unique_ptr<Window>;
 using RenderTargetPtr = std::unique_ptr<RenderTarget>;
 using MaterialPtr = std::unique_ptr<Material>;
 using TexturePtr = std::unique_ptr<Texture>;
+using RawMeshPtr = std::unique_ptr<RawMesh>;
+using BufferPoolPtr = std::unique_ptr<BufferPool>;
+using StagingPoolPtr = std::unique_ptr<StagingPool>;
 
 // Shared pointer typedefs for shared resources
 using TextureRef = std::shared_ptr<Texture>;
 using MeshRef = std::shared_ptr<Mesh>;
+using RawMeshRef = std::shared_ptr<RawMesh>;
 using ShaderRef = std::shared_ptr<ShaderModule>;
 
 } // namespace finevk

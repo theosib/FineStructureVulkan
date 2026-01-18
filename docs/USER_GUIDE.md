@@ -281,6 +281,133 @@ auto quad = finevk::Mesh::Builder(device, commandPool)
 auto bounds = mesh->boundingBox();  // {min, max}
 ```
 
+### Custom Vertex Formats (RawMesh - Planned)
+
+For specialized rendering (voxels, particles, terrain), `RawMesh` supports custom vertex formats:
+
+```cpp
+// Define your vertex type
+struct ChunkVertex {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texCoord;
+    float ao;  // Ambient occlusion - custom field!
+
+    static VkVertexInputBindingDescription bindingDescription() {
+        return {0, sizeof(ChunkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+    }
+
+    static std::vector<VkVertexInputAttributeDescription> attributeDescriptions() {
+        return {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, position)},
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, normal)},
+            {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ChunkVertex, texCoord)},
+            {3, 0, VK_FORMAT_R32_SFLOAT, offsetof(ChunkVertex, ao)}
+        };
+    }
+};
+
+// Create mesh with bulk data upload
+std::vector<ChunkVertex> vertices = generateChunkMesh();
+std::vector<uint32_t> indices = generateIndices();
+
+auto mesh = finevk::RawMesh::create(device)
+    .vertexLayout(ChunkVertex::bindingDescription(),
+                  ChunkVertex::attributeDescriptions())
+    .vertices(vertices.data(), vertices.size() * sizeof(ChunkVertex))
+    .indices(indices.data(), indices.size())
+    .reserveCapacity(1.5f)  // 50% extra for updates
+    .build(commandPool);
+
+// Update mesh in-place (great for voxel chunks)
+if (mesh->canUpdateInPlace(newVertexBytes, newIndexCount)) {
+    mesh->update(*commandPool, newData.data(), newVertexBytes,
+                 newIndices.data(), newIndexCount);
+}
+
+// Render
+mesh->bind(cmd);
+mesh->draw(cmd);
+```
+
+**When to use RawMesh vs Mesh:**
+- **Mesh**: Standard 3D models, OBJ files, vertex deduplication, bounds calculation
+- **RawMesh**: Custom vertex formats, bulk data, frequent updates (voxels, particles)
+
+**Note**: RawMesh is planned for an upcoming release. See [VOXEL_INTEGRATION_PLAN.md](VOXEL_INTEGRATION_PLAN.md).
+
+### Async Asset Loading (Recommended for Games)
+
+The `AssetLoader` loads textures and meshes asynchronously on background threads, with graceful degradation:
+
+```cpp
+#include <finevk/engine/asset_loader.hpp>
+
+// Create loader with 2 worker threads (not started yet)
+auto loader = finevk::AssetLoader::create(
+    device.get(),
+    device->defaultCommandPool(),
+    2);  // Number of worker threads
+
+// Start worker threads
+loader->start();
+
+// Load assets (returns immediately - NEVER NULL!)
+finevk::TextureRef floorTex = loader->loadTexture("floor.png");
+finevk::MeshRef playerMesh = loader->loadMesh("player.obj");
+
+// Use immediately - no null checks needed
+material->setTexture(0, floorTex);  // Shows pending → real → error
+
+// In game loop
+while (!renderer->shouldClose()) {
+    // Process GPU uploads (time-budgeted: 2ms per frame)
+    loader->update();
+
+    // Optional: Check status
+    if (loader->isReady("floor.png")) {
+        // Asset is fully loaded
+    } else if (loader->isFailed("floor.png")) {
+        // Asset failed to load (shows error texture)
+        std::cerr << "Error: " << loader->getError("floor.png") << "\n";
+    }
+
+    // Render - TextureRef is always valid (never null)
+    renderScene(floorTex, playerMesh);
+}
+```
+
+**Key Features:**
+- **Never returns null**: Returns `TextureRef`/`MeshRef` immediately
+- **Sentinel objects**: Shows placeholder while loading, error texture if failed
+- **Path-based caching**: Same path returns same shared asset
+- **Thread-safe**: Load from any thread, update() on main thread only
+- **Time-budgeted**: Won't drop frames during uploads
+
+**Sentinel Objects:**
+| State | Texture | Mesh |
+|-------|---------|------|
+| Pending (Debug) | Black/yellow checkerboard | Wireframe cube |
+| Pending (Release) | Gray | Wireframe cube |
+| Error | Magenta checkerboard | Solid magenta cube |
+
+**Status Queries:**
+```cpp
+bool isReady = loader->isReady("texture.png");
+bool hasFailed = loader->isFailed("texture.png");
+float progress = loader->getProgress("texture.png");  // 0.0 to 1.0
+std::string errorMsg = loader->getError("texture.png");
+
+size_t cacheSize = loader->getCacheSize();
+size_t pendingCount = loader->getPendingCount();
+```
+
+**Best Practices:**
+- Call `loader->update()` once per frame
+- Load all assets at level start, then update each frame
+- Check `isFailed()` for critical assets (player model, UI textures)
+- Use visual feedback - sentinel textures show what's loading/broken
+
 ---
 
 ## Uniforms and Descriptors

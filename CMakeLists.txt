@@ -92,6 +92,8 @@ add_library(finevk-core
     src/device/logical_device.cpp
     src/device/memory.cpp
     src/device/buffer.cpp
+    src/device/buffer_pool.cpp
+    src/device/staging_pool.cpp
     src/device/image.cpp
     src/device/sampler.cpp
     src/device/command.cpp
@@ -108,6 +110,7 @@ add_library(finevk-core
     # Layer 4: High-Level Abstractions
     src/high/texture.cpp
     src/high/mesh.cpp
+    src/high/raw_mesh.cpp
     src/high/simple_renderer.cpp
 
     # Window
@@ -168,11 +171,18 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/game_loop.cpp
         src/engine/camera.cpp
         src/engine/render_agent.cpp
+        src/engine/asset_loader.cpp
     )
 
     target_include_directories(finevk-engine PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    )
+
+    # External header-only libraries (stb_image, tinyobjloader)
+    target_include_directories(finevk-engine PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
     )
 
     target_link_libraries(finevk-engine PUBLIC finevk-core)

@@ -248,7 +248,53 @@ But configuration objects and function call sequences should be abstracted.
 
 **Planned Solution**: Unified RenderTarget abstraction that works for both.
 
-### 3.5 Input State Encapsulation (Planned)
+### 3.5 Service Lifecycle Management
+
+**Decision**: No auto-starting services. All background threads/services require explicit start/stop calls.
+
+**Rationale**:
+1. Objects may be created on heap, stack, or in global space
+2. Startup timing must be under developer control
+3. Destructor cleanup should be safe even if never started
+4. Clear lifecycle: construct → start → stop → destruct
+
+**Pattern**:
+```cpp
+class ServiceWithThreads {
+public:
+    static std::unique_ptr<ServiceWithThreads> create(...);  // No threads yet
+
+    void start();   // Starts worker threads
+    void stop();    // Stops worker threads gracefully
+
+    ~ServiceWithThreads() {
+        if (isRunning_) stop();  // Safe cleanup
+    }
+
+private:
+    bool isRunning_ = false;
+    std::vector<std::thread> workers_;
+};
+```
+
+**Examples**:
+- **AssetLoader**: `create()` prepares system, `start()` launches worker threads
+- **GameLoop**: `create()` sets up state, `start()` begins frame loop
+- **AudioSystem** (future): `create()` initializes audio device, `start()` begins playback thread
+
+**Anti-pattern**: Starting threads in constructor
+```cpp
+// BAD - auto-starts
+AssetLoader::AssetLoader() {
+    startWorkers();  // Thread race if object not fully constructed
+}
+
+// GOOD - explicit control
+auto loader = AssetLoader::create(...);
+loader->start();  // Developer controls when threads start
+```
+
+### 3.6 Input State Encapsulation (Planned)
 
 **Problem**: Current event callbacks provide minimal context. Users often need to:
 - Check modifier key states (Shift, Ctrl, Alt)
@@ -302,6 +348,78 @@ using MouseButtonCallback = std::function<void(MouseButton btn, Action action, c
 using MouseMoveCallback = std::function<void(double x, double y, const InputState& state)>;
 ```
 
+### 3.7 Mesh vs RawMesh (Custom Vertex Formats)
+
+**Problem**: The `Mesh` class uses a fixed `Vertex` struct. Voxel engines and other specialized renderers need custom vertex formats (e.g., ambient occlusion, texture array indices).
+
+**Decision**: Create separate `RawMesh` class instead of extending `Mesh`.
+
+**Rationale**:
+1. **Different purposes**: `Mesh` for standard 3D models, `RawMesh` for custom formats
+2. **No vertex processing**: `RawMesh` doesn't need deduplication, bounds calculation
+3. **Type-erased**: User provides vertex layout, no templates needed
+4. **Cleaner API**: Users choose the right tool
+5. **Backward compatible**: `Mesh` unchanged
+
+**API Design**:
+```cpp
+// User defines their vertex type
+struct ChunkVertex {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texCoord;
+    float ao;  // Custom field
+
+    static VkVertexInputBindingDescription bindingDescription();
+    static std::vector<VkVertexInputAttributeDescription> attributeDescriptions();
+};
+
+// Create with RawMesh
+auto mesh = RawMesh::create(device)
+    .vertexLayout(ChunkVertex::bindingDescription(),
+                  ChunkVertex::attributeDescriptions())
+    .vertices(data.data(), data.size() * sizeof(ChunkVertex))
+    .indices(indices.data(), indices.size())
+    .reserveCapacity(1.5f)  // For in-place updates
+    .build(commandPool);
+
+// Update in-place (for voxel chunks)
+mesh->update(*commandPool, newData.data(), newData.size() * sizeof(ChunkVertex),
+             newIndices.data(), newIndices.size());
+```
+
+**Key Features**:
+- Type-erased (no templates)
+- Bulk data upload (single memcpy)
+- In-place update with capacity reservation
+- Stores vertex layout for pipeline creation
+
+**See**: [VOXEL_INTEGRATION_PLAN.md](VOXEL_INTEGRATION_PLAN.md) for full design.
+
+### 3.8 Bulk Data Upload
+
+**Problem**: Per-vertex API (`addVertex()`) is inefficient for large meshes.
+
+**Decision**: Add bulk upload methods to both `Mesh::Builder` and `RawMesh::Builder`.
+
+**Mesh::Builder additions**:
+```cpp
+Builder& addVertices(const Vertex* data, size_t count);
+Builder& addVertices(const std::vector<Vertex>& vertices);
+Builder& addIndices(const uint32_t* data, size_t count);
+```
+
+**RawMesh::Builder** (bulk by design):
+```cpp
+Builder& vertices(const void* data, size_t byteSize);
+Builder& indices(const uint32_t* data, size_t count);
+```
+
+**Rationale**:
+- Single `memcpy` vs N insertions
+- Essential for voxel mesh generation (thousands of vertices)
+- Compatible with existing per-vertex API
+
 ---
 
 ## §4 STATUS
@@ -329,9 +447,13 @@ using MouseMoveCallback = std::function<void(double x, double y, const InputStat
 
 ### 4.3 Planned
 
+- [ ] **RawMesh class** - Custom vertex formats with bulk upload and in-place update
+- [ ] **Mesh::Builder bulk methods** - addVertices(data, count), addIndices(data, count)
 - [ ] **RenderTarget abstraction** - Unify swapchain/offscreen rendering
 - [ ] **Input state encapsulation** - Fat event struct with modifier/button states
 - [ ] **Swing-style listeners** - In addition to lambda callbacks
+- [ ] **Buffer pooling** - Optional pools for reduced allocation (voxel optimization)
+- [ ] **Staging buffer pool** - Reusable staging for frequent uploads
 - [ ] Compute pipelines
 - [ ] Ray tracing
 

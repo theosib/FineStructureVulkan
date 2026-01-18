@@ -17,6 +17,8 @@
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/memory.hpp"
 #include "finevk/device/buffer.hpp"
+#include "finevk/device/buffer_pool.hpp"
+#include "finevk/device/staging_pool.hpp"
 #include "finevk/device/image.hpp"
 #include "finevk/device/sampler.hpp"
 #include "finevk/device/command.hpp"
@@ -33,10 +35,19 @@
 // High-Level Abstractions (Layer 4)
 #include "finevk/high/texture.hpp"
 #include "finevk/high/mesh.hpp"
+#include "finevk/high/raw_mesh.hpp"
 #include "finevk/high/uniform_buffer.hpp"
 #include "finevk/high/format_utils.hpp"
 #include "finevk/high/simple_renderer.hpp"
 #include "finevk/high/material.hpp"
+
+// Engine Features (Layer 5)
+#include "finevk/engine/asset_loader.hpp"
+#include "finevk/engine/camera.hpp"
+#include "finevk/engine/render_agent.hpp"
+#include "finevk/engine/frame_clock.hpp"
+#include "finevk/engine/game_loop.hpp"
+#include "finevk/engine/deferred_disposer.hpp"
 
 // Forward declarations and common types
 #include "finevk/core/types.hpp"

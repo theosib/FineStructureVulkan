@@ -216,6 +216,81 @@ Buffer:
     mappedPtr() -> void*  // Non-null for host-visible
 ```
 
+### BufferPool (Memory Optimization)
+
+```cpp
+// For reducing allocation overhead with many small buffers (e.g., voxel chunks)
+BufferPool::create(device)
+    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)  // Required
+    .blockSize(16 * 1024 * 1024)               // 16MB blocks (default)
+    .mappable(bool)                            // Enable CPU access
+    .build() -> BufferPoolPtr
+
+BufferPool:
+    allocate(size, alignment=256) -> BufferAllocation
+    free(BufferAllocation&)
+    reset()                                    // Free all allocations
+    totalCapacity() -> VkDeviceSize
+    totalUsed() -> VkDeviceSize
+    blockCount() -> size_t
+    allocationCount() -> size_t
+
+struct BufferAllocation {
+    Buffer* buffer;
+    VkDeviceSize offset;
+    VkDeviceSize size;
+    void* mappedPtr;      // If pool is mappable
+    bool isValid() const;
+    VkBuffer handle() const;
+};
+```
+
+### StagingPool (Upload Optimization)
+
+```cpp
+// For reducing staging buffer allocation during frequent uploads
+StagingPool::create(device)
+    .initialSize(4 * 1024 * 1024)   // 4MB default buffer size
+    .preAllocate(count)              // Pre-create buffers
+    .build() -> StagingPoolPtr
+
+StagingPool:
+    acquire(size) -> StagingAllocation
+    release(StagingAllocation&, VkFence)  // Fence for GPU completion
+    processCompleted()                    // Call each frame to reclaim
+    waitAll()                             // Block until all complete
+    totalCapacity() -> VkDeviceSize
+    buffersInUse() -> size_t
+    buffersAvailable() -> size_t
+
+struct StagingAllocation {
+    Buffer* buffer;
+    VkDeviceSize offset;
+    VkDeviceSize size;
+    void* mappedPtr;      // Always valid for staging
+    bool isValid() const;
+};
+```
+
+**Usage Pattern**:
+```cpp
+// Staging pool for frequent uploads
+auto stagingPool = StagingPool::create(device)
+    .initialSize(8 * 1024 * 1024)
+    .preAllocate(2)
+    .build();
+
+// Acquire staging buffer
+auto staging = stagingPool->acquire(dataSize);
+memcpy(staging.mappedPtr, data, dataSize);
+
+// ... submit GPU transfer command ...
+stagingPool->release(staging, transferFence);
+
+// In game loop
+stagingPool->processCompleted();  // Reclaim finished transfers
+```
+
 ### Image
 
 ```cpp
@@ -572,6 +647,12 @@ Mesh::Builder(device, cmdPool)
     .indices(vector<uint32_t>)
     .build() -> MeshPtr
 
+// PLANNED: Bulk upload
+Mesh::Builder
+    .addVertices(Vertex* data, size_t count)
+    .addVertices(vector<Vertex>)
+    .addIndices(uint32_t* data, size_t count)
+
 Mesh:
     draw(VkCommandBuffer)
     vertexCount(), indexCount() -> uint32_t
@@ -579,6 +660,82 @@ Mesh:
     vertexBuffer() -> Buffer*
     indexBuffer() -> Buffer*
 ```
+
+### RawMesh (Custom Vertex Formats)
+
+```cpp
+// For custom vertex types (voxels, particles, terrain)
+// IMPORTANT: vertexLayout() must be called before vertices()
+RawMesh::create(device)
+    .vertexLayout(VkVertexInputBindingDescription, vector<VkVertexInputAttributeDescription>)  // REQUIRED first
+    .vertices(void* data, size_t count)       // count = number of vertices (not bytes!)
+    .indices(uint32_t* data, size_t count)    // 32-bit indices
+    .indices(uint16_t* data, size_t count)    // 16-bit indices (more efficient for <65K vertices)
+    .reserveCapacity(float multiplier)         // For in-place updates
+    .build(cmdPool) -> RawMeshPtr
+
+RawMesh:
+    // Accessors
+    vertexBuffer() -> Buffer*
+    indexBuffer() -> Buffer*
+    indexCount() -> uint32_t
+    indexType() -> VkIndexType                 // VK_INDEX_TYPE_UINT16 or VK_INDEX_TYPE_UINT32
+    vertexStride() -> uint32_t
+    bindingDescription() -> VkVertexInputBindingDescription&
+    attributeDescriptions() -> vector<VkVertexInputAttributeDescription>&
+
+    // Rendering
+    bind(CommandBuffer&)
+    draw(CommandBuffer&, instanceCount=1)
+
+    // Update (for dynamic meshes)
+    canUpdateInPlace(vertexCount, indexCount) -> bool
+    update(CommandPool&, vertexData, vertexCount, indexData, indexCount)
+    // Note: indexData is void* - uses stored indexType_ for interpretation
+```
+
+**Usage Pattern**:
+```cpp
+// Define custom vertex
+struct ChunkVertex {
+    vec3 position;
+    vec3 normal;
+    vec2 texCoord;
+    float ao;  // Custom field
+
+    static VkVertexInputBindingDescription bindingDescription();
+    static vector<VkVertexInputAttributeDescription> attributeDescriptions();
+};
+
+// Create with 32-bit indices
+auto mesh = RawMesh::create(device)
+    .vertexLayout(ChunkVertex::bindingDescription(),
+                  ChunkVertex::attributeDescriptions())
+    .vertices(data.data(), data.size())       // count, not bytes!
+    .indices(indices.data(), indices.size())
+    .reserveCapacity(1.5f)
+    .build(commandPool);
+
+// Or with 16-bit indices (more efficient for small meshes)
+std::vector<uint16_t> indices16;
+auto smallMesh = RawMesh::create(device)
+    .vertexLayout(ChunkVertex::bindingDescription(),
+                  ChunkVertex::attributeDescriptions())
+    .vertices(data.data(), data.size())
+    .indices(indices16.data(), indices16.size())  // 16-bit version
+    .reserveCapacity(1.5f)
+    .build(commandPool);
+
+// Update in-place (uses count, not bytes)
+if (mesh->canUpdateInPlace(newData.size(), newIndices.size())) {
+    mesh->update(*commandPool, newData.data(), newData.size(),
+                 newIndices.data(), newIndices.size());
+}
+```
+
+**When to use**:
+- Mesh: Standard 3D models, OBJ files, vertex deduplication
+- RawMesh: Custom vertex formats, bulk data, frequent updates
 
 ### UniformBuffer<T>
 
@@ -730,6 +887,153 @@ while (!renderer->shouldClose()) {
 renderer->waitIdle();
 ```
 
+## Engine Features
+
+### AssetLoader - Async Asset Loading
+
+**Design Philosophy**: Path-based, never-null, sentinel objects for graceful degradation.
+
+```cpp
+AssetLoader::create(device, commandPool, numWorkers) -> unique_ptr<AssetLoader>
+
+AssetLoader:
+    // Lifecycle (explicit start/stop)
+    start()  // Start worker threads (call after create)
+    stop()   // Stop worker threads gracefully
+    isRunning() -> bool
+
+    // Loading (returns immediately, never null)
+    loadTexture(path, generateMipmaps=true, srgb=true) -> TextureRef
+    loadMesh(path, attributes=Pos|Norm|Tex) -> MeshRef
+
+    // Per-frame update (call once per frame on main thread)
+    update(timeBudget=0.002f) -> size_t  // Returns upload count
+
+    // Status queries
+    isReady(path) -> bool
+    isFailed(path) -> bool
+    getProgress(path) -> float  // 0.0 to 1.0
+    getError(path) -> string
+
+    // Sentinel access
+    pendingTexture() -> TextureRef
+    errorTexture() -> TextureRef
+    pendingMesh() -> MeshRef
+    errorMesh() -> MeshRef
+
+    // Stats
+    getCacheSize() -> size_t
+    getPendingCount() -> size_t
+    getWorkerCount() -> uint32_t
+```
+
+**Key Features**:
+- **Path-based caching**: Same path returns same shared asset
+- **Never returns null**: Returns sentinel objects for pending/error states
+- **Worker thread pool**: Configurable background loading threads
+- **Time-budgeted GPU uploads**: Processes uploads with 2ms frame budget
+- **Graceful error handling**: Failed loads show error sentinel (magenta)
+
+**Sentinel Objects**:
+- **Pending texture**: Debug (black/yellow checkerboard), Release (gray)
+- **Error texture**: Magenta checkerboard (always visible)
+- **Pending mesh**: Simple cube (front/back faces)
+- **Error mesh**: Full solid cube
+
+**Usage Pattern**:
+```cpp
+// Setup (workers not started)
+auto loader = AssetLoader::create(device.get(), device->defaultCommandPool(), 2);
+loader->start();  // Start worker threads
+
+// Load (returns immediately with TextureRef - NEVER NULL)
+TextureRef floorTex = loader->loadTexture("floor.png");
+MeshRef cubeMesh = loader->loadMesh("cube.obj");
+
+// Use immediately - no null checks needed!
+material->setTexture(0, floorTex);  // Shows pending -> real -> error
+
+// In game loop
+while (running) {
+    loader->update();  // Process GPU uploads (time-budgeted)
+
+    // Optional: Check status
+    if (loader->isReady("floor.png")) {
+        // Asset fully loaded
+    }
+
+    // Render - always safe, TextureRef never null
+    render(floorTex);
+}
+```
+
+**Thread Safety**:
+- loadTexture/loadMesh: Thread-safe
+- update(): Main thread only (does GPU uploads)
+- Status queries: Thread-safe
+
+**Implementation Notes**:
+- Uses existing Texture/Mesh APIs via builder pattern
+- Returns shared_ptr (TextureRef/MeshRef) - auto refcounting
+- Worker threads load from disk, main thread uploads to GPU
+- Auto-unload can be added in future (Phase 2)
+
+### Camera - View/Projection System
+
+```cpp
+Camera::create() -> CameraPtr
+
+Camera:
+    // Position and orientation
+    setPosition(vec3)
+    setRotation(quat)
+    lookAt(eye, target, up)
+
+    // Projection
+    setPerspective(fov, aspect, near, far)
+    setOrthographic(left, right, bottom, top, near, far)
+
+    // Matrices
+    view() -> mat4
+    projection() -> mat4
+
+    // Frustum culling
+    isVisible(AABB) -> bool
+
+    // Movement helpers
+    move(vec3 offset)
+    rotate(vec3 euler)
+
+    // State
+    position() -> vec3
+    rotation() -> quat
+    forward/right/up() -> vec3
+```
+
+### RenderAgent - Organized Rendering
+
+```cpp
+RenderAgent::create(camera) -> unique_ptr<RenderAgent>
+
+RenderAgent:
+    // Add renderables
+    add(Renderable{mesh, material, pipeline, ...})
+
+    // Render organized by phase
+    render(cmd, phase)
+
+    // Culling
+    cullAndSort(camera)
+
+Renderable:
+    mesh: Mesh*
+    material: Material*
+    pipeline: GraphicsPipeline*
+    pipelineLayout: PipelineLayout*
+    transform: mat4
+    phase: RenderPhase (Opaque, Transparent, UI)
+```
+
 ## File Locations
 
 ```
@@ -741,12 +1045,15 @@ include/finevk/
                 pipeline.hpp, descriptors.hpp, sync.hpp
   high/         simple_renderer.hpp, texture.hpp, mesh.hpp,
                 uniform_buffer.hpp, vertex.hpp
+  engine/       asset_loader.hpp, camera.hpp, render_agent.hpp,
+                frame_clock.hpp, game_loop.hpp, deferred_disposer.hpp
   window/       window.hpp
   platform/     glfw_surface.hpp
   finevk.hpp    (umbrella header)
 
 src/            (implementation files mirror include structure)
-examples/       hello_triangle/, viking_room/
+examples/       hello_triangle/, viking_room/, asset_loader/
 tests/          test_phase1.cpp - test_phase4.cpp
-docs/           ARCHITECTURE.md, USER_GUIDE.md, USER_GUIDE_LLM.md, DESIGN.md
+docs/           ARCHITECTURE.md, USER_GUIDE.md, USER_GUIDE_LLM.md,
+                DESIGN.md, ASSET_LOADER_SPEC.md, ASSET_LOADER_FINAL.md
 ```

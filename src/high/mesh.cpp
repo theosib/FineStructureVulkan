@@ -296,6 +296,21 @@ Mesh::Builder& Mesh::Builder::addIndices(const std::vector<uint32_t>& indices) {
     return *this;
 }
 
+Mesh::Builder& Mesh::Builder::addVertices(const Vertex* data, size_t count) {
+    vertices_.insert(vertices_.end(), data, data + count);
+    return *this;
+}
+
+Mesh::Builder& Mesh::Builder::addVertices(const std::vector<Vertex>& vertices) {
+    vertices_.insert(vertices_.end(), vertices.begin(), vertices.end());
+    return *this;
+}
+
+Mesh::Builder& Mesh::Builder::addIndices(const uint32_t* data, size_t count) {
+    indices_.insert(indices_.end(), data, data + count);
+    return *this;
+}
+
 void Mesh::Builder::packVertexData(std::vector<float>& packed) const {
     uint32_t stride = Vertex::stride(attrs_);
     packed.resize(vertices_.size() * stride / sizeof(float));
