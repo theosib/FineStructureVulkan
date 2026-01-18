@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # =============================================================================
 option(FINEVK_BUILD_TESTS "Build tests" ON)
 option(FINEVK_BUILD_EXAMPLES "Build examples" ON)
+option(FINEVK_BUILD_SHARED "Build shared libraries (.so/.dylib/.dll)" ON)
 option(FINEVK_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
 
 # =============================================================================
@@ -78,9 +79,9 @@ message(STATUS "Found GLM")
 include(cmake/CompileShaders.cmake)
 
 # =============================================================================
-# Core library
+# Core library sources (object library for code reuse)
 # =============================================================================
-add_library(finevk-core
+set(FINEVK_CORE_SOURCES
     # Layer 1: Core Foundation
     src/core/instance.cpp
     src/core/surface.cpp
@@ -111,6 +112,7 @@ add_library(finevk-core
     src/high/texture.cpp
     src/high/mesh.cpp
     src/high/raw_mesh.cpp
+    src/high/material.cpp
     src/high/simple_renderer.cpp
 
     # Window
@@ -120,43 +122,86 @@ add_library(finevk-core
     src/platform/glfw_surface.cpp
 )
 
-target_include_directories(finevk-core PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
+# Helper function to configure a finevk-core target
+function(configure_finevk_core_target TARGET_NAME)
+    target_include_directories(${TARGET_NAME} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
 
-# External header-only libraries (stb_image, tinyobjloader)
-target_include_directories(finevk-core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
-)
+    # External header-only libraries (stb_image, tinyobjloader)
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
+    )
 
-target_link_libraries(finevk-core PUBLIC
-    Vulkan::Vulkan
-    glfw
-    glm::glm
-)
+    target_link_libraries(${TARGET_NAME} PUBLIC
+        Vulkan::Vulkan
+        glfw
+        glm::glm
+    )
 
-# Platform-specific configuration
-if(APPLE)
-    target_compile_definitions(finevk-core PUBLIC VK_USE_PLATFORM_MACOS_MVK)
-    target_compile_definitions(finevk-core PUBLIC VK_ENABLE_BETA_EXTENSIONS)
-elseif(WIN32)
-    target_compile_definitions(finevk-core PUBLIC VK_USE_PLATFORM_WIN32_KHR)
-elseif(UNIX)
-    target_compile_definitions(finevk-core PUBLIC VK_USE_PLATFORM_XCB_KHR)
+    # Platform-specific configuration
+    if(APPLE)
+        target_compile_definitions(${TARGET_NAME} PUBLIC VK_USE_PLATFORM_MACOS_MVK)
+        target_compile_definitions(${TARGET_NAME} PUBLIC VK_ENABLE_BETA_EXTENSIONS)
+    elseif(WIN32)
+        target_compile_definitions(${TARGET_NAME} PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+    elseif(UNIX)
+        target_compile_definitions(${TARGET_NAME} PUBLIC VK_USE_PLATFORM_XCB_KHR)
+    endif()
+
+    # Enable validation in debug builds
+    if(FINEVK_ENABLE_VALIDATION)
+        target_compile_definitions(${TARGET_NAME} PUBLIC FINEVK_ENABLE_VALIDATION)
+    endif()
+
+    # Compiler warnings
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+    elseif(MSVC)
+        target_compile_options(${TARGET_NAME} PRIVATE /W4)
+    endif()
+endfunction()
+
+# =============================================================================
+# Static library (always built)
+# =============================================================================
+add_library(finevk-core-static STATIC ${FINEVK_CORE_SOURCES})
+configure_finevk_core_target(finevk-core-static)
+set_target_properties(finevk-core-static PROPERTIES OUTPUT_NAME finevk-core)
+
+# =============================================================================
+# Shared library (optional)
+# =============================================================================
+if(FINEVK_BUILD_SHARED)
+    add_library(finevk-core-shared SHARED ${FINEVK_CORE_SOURCES})
+    configure_finevk_core_target(finevk-core-shared)
+    set_target_properties(finevk-core-shared PROPERTIES
+        OUTPUT_NAME finevk-core
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+    )
+
+    # Position-independent code for shared library
+    set_target_properties(finevk-core-shared PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # Export symbols on Windows
+    if(WIN32)
+        target_compile_definitions(finevk-core-shared PRIVATE FINEVK_EXPORTS)
+        target_compile_definitions(finevk-core-shared INTERFACE FINEVK_IMPORTS)
+    endif()
+
+    message(STATUS "Building shared library: finevk-core")
 endif()
 
-# Enable validation in debug builds
-if(FINEVK_ENABLE_VALIDATION)
-    target_compile_definitions(finevk-core PUBLIC FINEVK_ENABLE_VALIDATION)
-endif()
-
-# Compiler warnings
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(finevk-core PRIVATE -Wall -Wextra -Wpedantic)
-elseif(MSVC)
-    target_compile_options(finevk-core PRIVATE /W4)
+# =============================================================================
+# Alias for default usage (prefer shared if available)
+# =============================================================================
+if(FINEVK_BUILD_SHARED)
+    add_library(finevk-core ALIAS finevk-core-shared)
+else()
+    add_library(finevk-core ALIAS finevk-core-static)
 endif()
 
 # =============================================================================
@@ -165,7 +210,7 @@ endif()
 option(FINEVK_BUILD_ENGINE "Build finevk-engine (game utilities)" ON)
 
 if(FINEVK_BUILD_ENGINE)
-    add_library(finevk-engine
+    set(FINEVK_ENGINE_SOURCES
         src/engine/frame_clock.cpp
         src/engine/deferred_disposer.cpp
         src/engine/game_loop.cpp
@@ -174,23 +219,57 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/asset_loader.cpp
     )
 
-    target_include_directories(finevk-engine PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-    )
+    # Helper function to configure finevk-engine target
+    function(configure_finevk_engine_target TARGET_NAME CORE_TARGET)
+        target_include_directories(${TARGET_NAME} PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        )
 
-    # External header-only libraries (stb_image, tinyobjloader)
-    target_include_directories(finevk-engine PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
-    )
+        # External header-only libraries (stb_image, tinyobjloader)
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+            ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobjloader
+        )
 
-    target_link_libraries(finevk-engine PUBLIC finevk-core)
+        target_link_libraries(${TARGET_NAME} PUBLIC ${CORE_TARGET})
 
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(finevk-engine PRIVATE -Wall -Wextra -Wpedantic)
-    elseif(MSVC)
-        target_compile_options(finevk-engine PRIVATE /W4)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+        elseif(MSVC)
+            target_compile_options(${TARGET_NAME} PRIVATE /W4)
+        endif()
+    endfunction()
+
+    # Static engine library (always built)
+    add_library(finevk-engine-static STATIC ${FINEVK_ENGINE_SOURCES})
+    configure_finevk_engine_target(finevk-engine-static finevk-core-static)
+    set_target_properties(finevk-engine-static PROPERTIES OUTPUT_NAME finevk-engine)
+
+    # Shared engine library (optional)
+    if(FINEVK_BUILD_SHARED)
+        add_library(finevk-engine-shared SHARED ${FINEVK_ENGINE_SOURCES})
+        configure_finevk_engine_target(finevk-engine-shared finevk-core-shared)
+        set_target_properties(finevk-engine-shared PROPERTIES
+            OUTPUT_NAME finevk-engine
+            VERSION ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR}
+        )
+        set_target_properties(finevk-engine-shared PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+        if(WIN32)
+            target_compile_definitions(finevk-engine-shared PRIVATE FINEVK_EXPORTS)
+            target_compile_definitions(finevk-engine-shared INTERFACE FINEVK_IMPORTS)
+        endif()
+
+        message(STATUS "Building shared library: finevk-engine")
+    endif()
+
+    # Alias for default usage (prefer shared if available)
+    if(FINEVK_BUILD_SHARED)
+        add_library(finevk-engine ALIAS finevk-engine-shared)
+    else()
+        add_library(finevk-engine ALIAS finevk-engine-static)
     endif()
 
     message(STATUS "finevk-engine will be built")
