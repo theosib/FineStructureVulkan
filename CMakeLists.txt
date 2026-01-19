@@ -122,6 +122,40 @@ set(FINEVK_CORE_SOURCES
     src/platform/glfw_surface.cpp
 )
 
+# Core library headers (for dependency tracking)
+set(FINEVK_CORE_HEADERS
+    include/finevk/finevk.hpp
+    include/finevk/core/types.hpp
+    include/finevk/core/instance.hpp
+    include/finevk/core/surface.hpp
+    include/finevk/core/debug.hpp
+    include/finevk/core/logging.hpp
+    include/finevk/device/physical_device.hpp
+    include/finevk/device/logical_device.hpp
+    include/finevk/device/memory.hpp
+    include/finevk/device/buffer.hpp
+    include/finevk/device/buffer_pool.hpp
+    include/finevk/device/staging_pool.hpp
+    include/finevk/device/image.hpp
+    include/finevk/device/sampler.hpp
+    include/finevk/device/command.hpp
+    include/finevk/rendering/swapchain.hpp
+    include/finevk/rendering/renderpass.hpp
+    include/finevk/rendering/framebuffer.hpp
+    include/finevk/rendering/pipeline.hpp
+    include/finevk/rendering/sync.hpp
+    include/finevk/rendering/descriptors.hpp
+    include/finevk/rendering/render_target.hpp
+    include/finevk/high/texture.hpp
+    include/finevk/high/mesh.hpp
+    include/finevk/high/raw_mesh.hpp
+    include/finevk/high/material.hpp
+    include/finevk/high/simple_renderer.hpp
+    include/finevk/high/format_utils.hpp
+    include/finevk/high/uniform_buffer.hpp
+    include/finevk/window/window.hpp
+)
+
 # Helper function to configure a finevk-core target
 function(configure_finevk_core_target TARGET_NAME)
     target_include_directories(${TARGET_NAME} PUBLIC
@@ -167,7 +201,7 @@ endfunction()
 # =============================================================================
 # Static library (always built)
 # =============================================================================
-add_library(finevk-core-static STATIC ${FINEVK_CORE_SOURCES})
+add_library(finevk-core-static STATIC ${FINEVK_CORE_SOURCES} ${FINEVK_CORE_HEADERS})
 configure_finevk_core_target(finevk-core-static)
 set_target_properties(finevk-core-static PROPERTIES OUTPUT_NAME finevk-core)
 
@@ -175,7 +209,7 @@ set_target_properties(finevk-core-static PROPERTIES OUTPUT_NAME finevk-core)
 # Shared library (optional)
 # =============================================================================
 if(FINEVK_BUILD_SHARED)
-    add_library(finevk-core-shared SHARED ${FINEVK_CORE_SOURCES})
+    add_library(finevk-core-shared SHARED ${FINEVK_CORE_SOURCES} ${FINEVK_CORE_HEADERS})
     configure_finevk_core_target(finevk-core-shared)
     set_target_properties(finevk-core-shared PROPERTIES
         OUTPUT_NAME finevk-core
@@ -219,6 +253,17 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/asset_loader.cpp
     )
 
+    # Engine library headers (for dependency tracking)
+    set(FINEVK_ENGINE_HEADERS
+        include/finevk/engine/finevk_engine.hpp
+        include/finevk/engine/frame_clock.hpp
+        include/finevk/engine/deferred_disposer.hpp
+        include/finevk/engine/game_loop.hpp
+        include/finevk/engine/camera.hpp
+        include/finevk/engine/render_agent.hpp
+        include/finevk/engine/asset_loader.hpp
+    )
+
     # Helper function to configure finevk-engine target
     function(configure_finevk_engine_target TARGET_NAME CORE_TARGET)
         target_include_directories(${TARGET_NAME} PUBLIC
@@ -242,13 +287,13 @@ if(FINEVK_BUILD_ENGINE)
     endfunction()
 
     # Static engine library (always built)
-    add_library(finevk-engine-static STATIC ${FINEVK_ENGINE_SOURCES})
+    add_library(finevk-engine-static STATIC ${FINEVK_ENGINE_SOURCES} ${FINEVK_ENGINE_HEADERS})
     configure_finevk_engine_target(finevk-engine-static finevk-core-static)
     set_target_properties(finevk-engine-static PROPERTIES OUTPUT_NAME finevk-engine)
 
     # Shared engine library (optional)
     if(FINEVK_BUILD_SHARED)
-        add_library(finevk-engine-shared SHARED ${FINEVK_ENGINE_SOURCES})
+        add_library(finevk-engine-shared SHARED ${FINEVK_ENGINE_SOURCES} ${FINEVK_ENGINE_HEADERS})
         configure_finevk_engine_target(finevk-engine-shared finevk-core-shared)
         set_target_properties(finevk-engine-shared PROPERTIES
             OUTPUT_NAME finevk-engine
