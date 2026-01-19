@@ -52,6 +52,11 @@ struct CameraState {
     /// Frustum planes in world space (left, right, bottom, top, near, far)
     /// Planes point inward (negative half-space is inside frustum)
     std::array<glm::vec4, 6> frustumPlanes;
+
+    /// Frustum planes in view-relative space (left, right, bottom, top, near, far)
+    /// Use with view-relative AABBs for large world coordinate support
+    /// These are extracted from projection * viewRelative
+    std::array<glm::vec4, 6> viewRelativeFrustumPlanes;
 };
 
 /**
@@ -206,8 +211,9 @@ public:
     glm::vec3 right() const;
 
 private:
-    void extractFrustumPlanes();
     void computeViewRelativeMatrix();
+    static void extractFrustumPlanesFrom(const glm::mat4& viewProjection,
+                                         std::array<glm::vec4, 6>& outPlanes);
 
     // Position and orientation
     glm::vec3 position_{0.0f, 0.0f, 0.0f};

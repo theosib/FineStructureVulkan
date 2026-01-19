@@ -233,8 +233,12 @@ void Camera::updateState() {
     // Compute view-projection matrix
     state_.viewProjection = state_.projection * state_.view;
 
-    // Extract frustum planes
-    extractFrustumPlanes();
+    // Extract frustum planes (world space)
+    extractFrustumPlanesFrom(state_.viewProjection, state_.frustumPlanes);
+
+    // Extract view-relative frustum planes (for large-world culling)
+    glm::mat4 viewRelativeVP = state_.projection * state_.viewRelative;
+    extractFrustumPlanesFrom(viewRelativeVP, state_.viewRelativeFrustumPlanes);
 }
 
 void Camera::computeViewRelativeMatrix() {
@@ -244,63 +248,62 @@ void Camera::computeViewRelativeMatrix() {
     state_.viewRelative = glm::lookAt(glm::vec3(0.0f), forward_, up_);
 }
 
-void Camera::extractFrustumPlanes() {
+void Camera::extractFrustumPlanesFrom(const glm::mat4& vp,
+                                      std::array<glm::vec4, 6>& outPlanes) {
     // Extract frustum planes from view-projection matrix
     // Planes are in format: Ax + By + Cz + D = 0
     // where (A, B, C) is the plane normal
 
-    const glm::mat4& m = state_.viewProjection;
-
     // Left plane
-    state_.frustumPlanes[0] = glm::vec4(
-        m[0][3] + m[0][0],
-        m[1][3] + m[1][0],
-        m[2][3] + m[2][0],
-        m[3][3] + m[3][0]
+    outPlanes[0] = glm::vec4(
+        vp[0][3] + vp[0][0],
+        vp[1][3] + vp[1][0],
+        vp[2][3] + vp[2][0],
+        vp[3][3] + vp[3][0]
     );
 
     // Right plane
-    state_.frustumPlanes[1] = glm::vec4(
-        m[0][3] - m[0][0],
-        m[1][3] - m[1][0],
-        m[2][3] - m[2][0],
-        m[3][3] - m[3][0]
+    outPlanes[1] = glm::vec4(
+        vp[0][3] - vp[0][0],
+        vp[1][3] - vp[1][0],
+        vp[2][3] - vp[2][0],
+        vp[3][3] - vp[3][0]
     );
 
     // Bottom plane
-    state_.frustumPlanes[2] = glm::vec4(
-        m[0][3] + m[0][1],
-        m[1][3] + m[1][1],
-        m[2][3] + m[2][1],
-        m[3][3] + m[3][1]
+    outPlanes[2] = glm::vec4(
+        vp[0][3] + vp[0][1],
+        vp[1][3] + vp[1][1],
+        vp[2][3] + vp[2][1],
+        vp[3][3] + vp[3][1]
     );
 
     // Top plane
-    state_.frustumPlanes[3] = glm::vec4(
-        m[0][3] - m[0][1],
-        m[1][3] - m[1][1],
-        m[2][3] - m[2][1],
-        m[3][3] - m[3][1]
+    outPlanes[3] = glm::vec4(
+        vp[0][3] - vp[0][1],
+        vp[1][3] - vp[1][1],
+        vp[2][3] - vp[2][1],
+        vp[3][3] - vp[3][1]
     );
 
     // Near plane
-    state_.frustumPlanes[4] = glm::vec4(
-        m[0][3] + m[0][2],
-        m[1][3] + m[1][2],
-        m[2][3] + m[2][2],
-        m[3][3] + m[3][2]
+    outPlanes[4] = glm::vec4(
+        vp[0][3] + vp[0][2],
+        vp[1][3] + vp[1][2],
+        vp[2][3] + vp[2][2],
+        vp[3][3] + vp[3][2]
     );
 
     // Far plane
-    state_.frustumPlanes[5] = glm::vec4(
-        m[0][3] - m[0][2],
-        m[1][3] - m[1][2],
-        m[2][3] - m[2][2],
-        m[3][3] - m[3][2]
+    outPlanes[5] = glm::vec4(
+        vp[0][3] - vp[0][2],
+        vp[1][3] - vp[1][2],
+        vp[2][3] - vp[2][2],
+        vp[3][3] - vp[3][2]
     );
 
     // Normalize planes
-    for (auto& plane : state_.frustumPlanes) {
+    for (auto& plane : outPlanes) {
         float length = glm::length(glm::vec3(plane));
         plane /= length;
     }

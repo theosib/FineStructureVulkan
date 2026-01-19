@@ -1061,7 +1061,8 @@ struct CameraState {
     mat4 viewProjection;
     vec3 position;                 // Float32 for GPU uniforms
     mat4 viewRelative;             // View matrix with camera at origin (rotation only)
-    array<vec4, 6> frustumPlanes;  // For culling
+    array<vec4, 6> frustumPlanes;  // World-space frustum planes
+    array<vec4, 6> viewRelativeFrustumPlanes;  // View-relative frustum planes (for large worlds)
 };
 
 struct AABB {
@@ -1093,6 +1094,12 @@ auto projection = camera.state().projection;
 glm::dvec3 objectWorldPos = ...;
 glm::vec3 viewRelOffset = glm::vec3(objectWorldPos - camera.positionD());
 // Pass viewRelOffset to shader as push constant
+
+// For frustum culling with view-relative AABBs:
+AABB chunkAABB = AABB::fromMinMax(chunkMin - cameraPos, chunkMax - cameraPos);
+if (chunkAABB.intersectsFrustum(camera.state().viewRelativeFrustumPlanes)) {
+    // Chunk is visible
+}
 ```
 
 ### RenderAgent - Organized Rendering

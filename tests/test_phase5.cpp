@@ -326,6 +326,45 @@ void test_camera_frustum_planes() {
     std::cout << "PASSED\n";
 }
 
+void test_camera_view_relative_frustum_planes() {
+    std::cout << "Test: Camera - View-relative frustum planes... ";
+
+    Camera camera;
+    camera.setPerspective(60.0f, 1.0f, 0.1f, 100.0f);
+
+    // Place camera at large world coordinates
+    glm::dvec3 largePos{1000000.0, 64.0, 1000000.0};
+    camera.moveTo(largePos);
+    camera.setOrientation(glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    camera.updateState();
+
+    const auto& state = camera.state();
+
+    // View-relative frustum planes should be populated
+    for (int i = 0; i < 6; i++) {
+        bool nonZero = (state.viewRelativeFrustumPlanes[i].x != 0.0f ||
+                       state.viewRelativeFrustumPlanes[i].y != 0.0f ||
+                       state.viewRelativeFrustumPlanes[i].z != 0.0f ||
+                       state.viewRelativeFrustumPlanes[i].w != 0.0f);
+        assert(nonZero);
+    }
+
+    // Test: AABB at origin in view-relative space should be visible
+    // (this represents an object at camera position in world space)
+    AABB nearOrigin = AABB::fromCenterExtents(glm::vec3(0, 0, -5), glm::vec3(1, 1, 1));
+    assert(nearOrigin.intersectsFrustum(state.viewRelativeFrustumPlanes) == true);
+
+    // Test: AABB behind camera in view-relative space should be culled
+    AABB behindCamera = AABB::fromCenterExtents(glm::vec3(0, 0, 10), glm::vec3(1, 1, 1));
+    assert(behindCamera.intersectsFrustum(state.viewRelativeFrustumPlanes) == false);
+
+    // Test: AABB far to the side should be culled
+    AABB farSide = AABB::fromCenterExtents(glm::vec3(100, 0, -5), glm::vec3(1, 1, 1));
+    assert(farSide.intersectsFrustum(state.viewRelativeFrustumPlanes) == false);
+
+    std::cout << "PASSED\n";
+}
+
 // ============================================================================
 // GraphicsPipeline Convenience Tests
 // ============================================================================
@@ -661,6 +700,7 @@ int main() {
         test_camera_lookAt(); passed++;
         test_camera_state_matrices(); passed++;
         test_camera_frustum_planes(); passed++;
+        test_camera_view_relative_frustum_planes(); passed++;
 
         // AABB tests (don't need context)
         test_aabb_basic(); passed++;
