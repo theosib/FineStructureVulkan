@@ -742,6 +742,68 @@ PushData push{transform};
 layout->pushConstants(cmd, VK_SHADER_STAGE_VERTEX_BIT, push);
 ```
 
+### Camera System
+
+The Camera class provides view/projection matrices and frustum culling:
+
+```cpp
+#include <finevk/engine/camera.hpp>
+
+finevk::Camera camera;
+camera.setPerspective(60.0f, aspectRatio, 0.1f, 1000.0f);
+camera.moveTo(glm::vec3(0.0f, 5.0f, 10.0f));
+camera.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
+camera.updateState();  // Must call after changes!
+
+// Get matrices for shaders
+auto& state = camera.state();
+mvpUniform.view = state.view;
+mvpUniform.projection = state.projection;
+```
+
+**Movement helpers:**
+```cpp
+camera.moveForward(speed * deltaTime);
+camera.moveRight(strafeSpeed * deltaTime);
+camera.rotateYaw(mouseDeltaX * sensitivity);
+camera.rotatePitch(mouseDeltaY * sensitivity);
+camera.updateState();
+```
+
+**Frustum culling with AABB:**
+```cpp
+finevk::AABB objectBounds = finevk::AABB::fromMinMax(minCorner, maxCorner);
+if (objectBounds.intersectsFrustum(camera.state().frustumPlanes)) {
+    // Object is visible - draw it
+}
+```
+
+**Large-world support (double-precision):**
+
+For games with large worlds (coordinates > 100,000 units), float32 precision causes camera jitter. Use double-precision positioning with view-relative rendering:
+
+```cpp
+// Use double-precision for camera position
+glm::dvec3 playerWorldPos{1000000.0, 64.0, 1000000.0};
+camera.moveTo(playerWorldPos);  // Automatically enables high-precision mode
+camera.updateState();
+
+// For rendering: use view-relative matrix (camera at origin)
+mvpUniform.view = camera.state().viewRelative;
+
+// Compute per-object offset on CPU with doubles, pass as push constant
+glm::dvec3 objectWorldPos = chunk.getWorldPosition();
+glm::vec3 viewRelOffset = glm::vec3(objectWorldPos - camera.positionD());
+
+// For frustum culling: use view-relative frustum planes
+glm::vec3 relMin = glm::vec3(chunkMin - camera.positionD());
+glm::vec3 relMax = glm::vec3(chunkMax - camera.positionD());
+finevk::AABB chunkAABB = finevk::AABB::fromMinMax(relMin, relMax);
+if (chunkAABB.intersectsFrustum(camera.state().viewRelativeFrustumPlanes)) {
+    // Chunk is visible
+}
+```
+
 ---
 
 ## Example: Complete Application
