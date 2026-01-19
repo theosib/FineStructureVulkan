@@ -517,9 +517,27 @@ As we build games, we'll discover patterns. Document them here with:
 - ✓ GameLoop restart capability (setup/shutdown state management)
 - ✓ Integrated DeferredDisposer into GameLoop's garbage collection
 
-### Phase 6: Prototype-Driven Development
+### Phase 6: Voxel Integration ✓ (Completed)
 
-**Goals**: Build 2-3 small game prototypes to discover needed patterns
+**Completed** (driven by FineStructureVoxel integration needs):
+- ✓ **Camera** - View/projection system with AABB frustum culling
+  - Double-precision position support for large worlds (`moveTo(glm::dvec3)`)
+  - View-relative matrix for jitter-free large-world rendering
+  - Movement helpers (moveForward, rotateYaw, etc.)
+- ✓ **RenderAgent** - Multi-phase rendering system
+  - Object submission with transform, material, pipeline
+  - Phase-based rendering (Opaque, Transparent, UI)
+  - Camera state integration
+
+**Promoted to finevk-core** (from voxel prototype needs):
+- ✓ **RawMesh** - Custom vertex formats with bulk upload
+- ✓ **BufferPool** - Sub-allocation for many small buffers
+- ✓ **StagingPool** - Reusable staging buffers with fence tracking
+- ✓ **GraphicsPipeline conveniences** - `vertexInput<T>()`, path-based shader loading, `cullBack()`
+
+### Phase 7: Prototype-Driven Development
+
+**Goals**: Build 2-3 small game prototypes to discover additional patterns
 
 **Prototypes to consider**:
 1. **2D Sprite Game** - Batch rendering, texture atlases, sprite sorting
@@ -541,10 +559,10 @@ Will be defined after prototype feedback.
 
 **Track features that moved from engine → core**:
 
-_None yet. Will update as patterns emerge._
-
-**Example format**:
-- **Material class** (hypothetical) - Started as engine helper, promoted to core due to descriptor complexity
+- **RawMesh** (Phase 6) - Type-erased custom vertex mesh class. Promoted from voxel prototype because it requires Vulkan buffer management knowledge and is useful beyond games (data visualization, CAD, etc.)
+- **BufferPool** (Phase 6) - Sub-allocation from large buffer blocks. Promoted because it requires VMA knowledge and reduces allocation overhead for many use cases
+- **StagingPool** (Phase 6) - Reusable staging buffers with fence tracking. Promoted for similar reasons to BufferPool
+- **GraphicsPipeline conveniences** (Phase 6) - `vertexInput<T>()`, path-based shader loading, `cullBack()`/`cullFront()`/`cullNone()`. Added directly to core as API improvements
 
 ---
 

@@ -370,33 +370,67 @@ struct ChunkVertex {
     glm::vec2 texCoord;
     float ao;  // Custom field
 
-    static VkVertexInputBindingDescription bindingDescription();
-    static std::vector<VkVertexInputAttributeDescription> attributeDescriptions();
+    static VkVertexInputBindingDescription getBindingDescription();
+    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions();
 };
 
 // Create with RawMesh
 auto mesh = RawMesh::create(device)
-    .vertexLayout(ChunkVertex::bindingDescription(),
-                  ChunkVertex::attributeDescriptions())
-    .vertices(data.data(), data.size() * sizeof(ChunkVertex))
+    .vertexLayout(sizeof(ChunkVertex))    // Stride only
+    .vertices(data.data(), data.size())   // Count, not bytes
     .indices(indices.data(), indices.size())
-    .reserveCapacity(1.5f)  // For in-place updates
+    .reserveCapacity(1.5f)                // For in-place updates
     .build(commandPool);
 
 // Update in-place (for voxel chunks)
-mesh->update(*commandPool, newData.data(), newData.size() * sizeof(ChunkVertex),
-             newIndices.data(), newIndices.size());
+if (mesh->canUpdateInPlace(newData.size(), newIndices.size())) {
+    mesh->update(*commandPool, newData.data(), newData.size(),
+                 newIndices.data(), newIndices.size());
+}
 ```
 
 **Key Features**:
 - Type-erased (no templates)
 - Bulk data upload (single memcpy)
 - In-place update with capacity reservation
-- Stores vertex layout for pipeline creation
+- Count-based API (not byte size)
 
-**See**: [VOXEL_INTEGRATION_PLAN.md](VOXEL_INTEGRATION_PLAN.md) for full design.
+### 3.8 Double-Precision Camera Position
 
-### 3.8 Bulk Data Upload
+**Problem**: At large world coordinates (e.g., 1,000,000 units from origin), float32 precision causes visible jitter. The camera position loses precision - at 1,000,000, float32 only has ~0.06 unit precision.
+
+**Solution**: Camera supports double-precision position via overloads (not new methods).
+
+```cpp
+Camera camera;
+camera.setPerspective(75.0f, aspect, 0.1f, 1000.0f);
+
+// Use double-precision position
+glm::dvec3 playerPos{1000000.0, 64.0, 1000000.0};
+camera.moveTo(playerPos);  // Overload switches to high-precision mode
+camera.updateState();
+
+// For view-relative rendering (recommended for large worlds):
+auto viewRelView = camera.state().viewRelative;  // Rotation only, camera at origin
+auto projection = camera.state().projection;
+
+// Per-object: compute view-relative offset on CPU with doubles
+glm::dvec3 objectWorldPos = ...;
+glm::vec3 viewRelOffset = glm::vec3(objectWorldPos - camera.positionD());
+// Pass viewRelOffset to shader as push constant
+```
+
+**Design Decision**: Use overloads (`moveTo(glm::dvec3)`) rather than new method names (`setHighPrecisionPosition`) because:
+- Follows FineVK's established overload pattern
+- Type system selects appropriate behavior automatically
+- Users don't need to learn new API
+
+**CameraState fields**:
+- `view` - Standard view matrix (may have precision loss at large coords)
+- `viewRelative` - View matrix with camera at origin (rotation only)
+- `position` - Float32 position for GPU uniforms
+
+### 3.9 Bulk Data Upload
 
 **Problem**: Per-vertex API (`addVertex()`) is inefficient for large meshes.
 
@@ -430,16 +464,21 @@ Builder& indices(const uint32_t* data, size_t count);
 - [x] PhysicalDevice, LogicalDevice
 - [x] Buffer, Image, ImageView, Sampler
 - [x] CommandPool, CommandBuffer
-- [x] RenderPass, Framebuffer
+- [x] RenderPass, Framebuffer, RenderTarget
 - [x] DescriptorSetLayout, DescriptorPool, DescriptorWriter, DescriptorBinding
 - [x] PipelineLayout, GraphicsPipeline, ShaderModule
 - [x] SwapChain
-- [x] Texture, Mesh, UniformBuffer
+- [x] Texture, Mesh, UniformBuffer, Material
 - [x] SimpleRenderer (with MSAA, uses Window internally)
 - [x] Window class (abstracts GLFW, owns Surface, SwapChain, sync)
 - [x] Reference/pointer/smart_ptr overloads (no .get() required)
 - [x] GLFW key/mouse constants exposed directly
 - [x] Examples updated to use Window API (hello_triangle, viking_room)
+- [x] **RawMesh class** - Custom vertex formats with bulk upload and in-place update
+- [x] **BufferPool** - Sub-allocation from large blocks for reduced allocation overhead
+- [x] **StagingPool** - Reusable staging buffers with fence-based reclamation
+- [x] **Camera** - With double-precision position support for large worlds
+- [x] **GraphicsPipeline conveniences** - Path-based shader loading, `vertexInput<T>()`, `cullBack()`/`cullFront()`/`cullNone()`
 
 ### 4.2 In Progress
 
@@ -447,13 +486,8 @@ Builder& indices(const uint32_t* data, size_t count);
 
 ### 4.3 Planned
 
-- [ ] **RawMesh class** - Custom vertex formats with bulk upload and in-place update
-- [ ] **Mesh::Builder bulk methods** - addVertices(data, count), addIndices(data, count)
-- [ ] **RenderTarget abstraction** - Unify swapchain/offscreen rendering
 - [ ] **Input state encapsulation** - Fat event struct with modifier/button states
 - [ ] **Swing-style listeners** - In addition to lambda callbacks
-- [ ] **Buffer pooling** - Optional pools for reduced allocation (voxel optimization)
-- [ ] **Staging buffer pool** - Reusable staging for frequent uploads
 - [ ] Compute pipelines
 - [ ] Ray tracing
 
@@ -472,13 +506,22 @@ Builder& indices(const uint32_t* data, size_t count);
 | LogicalDevice | `device/logical_device.hpp` | `device/logical_device.cpp` |
 | SwapChain | `rendering/swapchain.hpp` | `rendering/swapchain.cpp` |
 | RenderPass | `rendering/renderpass.hpp` | `rendering/renderpass.cpp` |
+| RenderTarget | `rendering/render_target.hpp` | `rendering/render_target.cpp` |
 | Pipeline | `rendering/pipeline.hpp` | `rendering/pipeline.cpp` |
 | Descriptors | `rendering/descriptors.hpp` | `rendering/descriptors.cpp` |
 | Buffer | `device/buffer.hpp` | `device/buffer.cpp` |
+| BufferPool | `device/buffer_pool.hpp` | `device/buffer_pool.cpp` |
+| StagingPool | `device/staging_pool.hpp` | `device/staging_pool.cpp` |
 | Image | `device/image.hpp` | `device/image.cpp` |
 | Texture | `high/texture.hpp` | `high/texture.cpp` |
 | Mesh | `high/mesh.hpp` | `high/mesh.cpp` |
+| RawMesh | `high/raw_mesh.hpp` | `high/raw_mesh.cpp` |
+| Material | `high/material.hpp` | `high/material.cpp` |
 | SimpleRenderer | `high/simple_renderer.hpp` | `high/simple_renderer.cpp` |
+| Camera | `engine/camera.hpp` | `engine/camera.cpp` |
+| AssetLoader | `engine/asset_loader.hpp` | `engine/asset_loader.cpp` |
+| GameLoop | `engine/game_loop.hpp` | `engine/game_loop.cpp` |
+| RenderAgent | `engine/render_agent.hpp` | `engine/render_agent.cpp` |
 
 ### 5.2 Directory Structure
 

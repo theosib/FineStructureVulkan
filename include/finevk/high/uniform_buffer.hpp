@@ -118,15 +118,16 @@ struct MVPUniform {
     alignas(16) glm::mat4 projection;
 };
 
-/// Camera/view data
+/// Camera/view data (std140 layout for uniform buffers)
 struct CameraUniform {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 projection;
     alignas(16) glm::mat4 viewProjection;
     alignas(16) glm::vec3 position;
+    float _positionPadding;  // vec3 is 16 bytes in std140
     alignas(4) float nearPlane;
     alignas(4) float farPlane;
-    alignas(4) float padding[3];
+    alignas(4) float padding[2];  // Padding to round to 16-byte alignment
 };
 
 /// Per-object transform data

@@ -152,7 +152,9 @@ int main() {
         auto pipelineBuilder = GraphicsPipeline::create(
             renderer->device(),
             renderer->renderPass(),
-            pipelineLayout)
+            pipelineLayout);
+
+        pipelineBuilder
             .vertexShader(vertShader)
             .fragmentShader(fragShader)
             .vertexBinding(binding.binding, binding.stride, binding.inputRate)

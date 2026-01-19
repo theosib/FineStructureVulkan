@@ -396,22 +396,47 @@ SwapChainFramebuffers:
 ### GraphicsPipeline
 
 ```cpp
-GraphicsPipeline::create(device, renderPass)
-    .vertexShader(path)
+// IMPORTANT: create() requires device, renderPass, AND pipelineLayout
+GraphicsPipeline::create(device, renderPass, pipelineLayout)
+    // Shader loading (path or ShaderModule)
+    .vertexShader(path)              // Load from SPIR-V file
+    .vertexShader(ShaderModule*)     // Use existing module
     .fragmentShader(path)
-    .vertexInput<T>()  // Uses T::getBindingDescription/getAttributeDescriptions
-    .viewport(width, height)
-    .scissor(x, y, w, h)
+    .fragmentShader(ShaderModule*)
+
+    // Vertex input
+    .vertexInput<T>()                // Uses T::getBindingDescription/getAttributeDescriptions
+    .vertexBinding(binding, stride, inputRate)    // Manual setup
+    .vertexAttribute(location, binding, format, offset)
+
+    // Input assembly
     .topology(VkPrimitiveTopology)
-    .cullMode(VkCullModeFlags)
+
+    // Rasterization
+    .cullBack()                      // Cull back faces (convenience)
+    .cullFront()                     // Cull front faces (convenience)
+    .cullNone()                      // Disable culling (convenience)
+    .cullMode(VkCullModeFlags)       // Custom cull mode
     .frontFace(VkFrontFace)
     .polygonMode(VkPolygonMode)
+
+    // Depth/stencil
+    .enableDepth()                   // Depth test + write + LESS (convenience)
     .depthTest(bool)
     .depthWrite(bool)
-    .depthOp(VkCompareOp)
-    .msaa(VkSampleCountFlagBits)
-    .blend(bool)  // Standard alpha blend
-    .layout(PipelineLayout*)
+    .depthCompareOp(VkCompareOp)
+
+    // Multisampling
+    .samples(VkSampleCountFlagBits)
+
+    // Blending
+    .alphaBlending()                 // Standard alpha blend (convenience)
+    .blending(bool)
+
+    // Dynamic state
+    .dynamicViewportAndScissor()     // Recommended for most cases
+    .dynamicState(VkDynamicState)
+
     .subpass(uint32_t)
     .build() -> GraphicsPipelinePtr
 
@@ -667,11 +692,11 @@ Mesh:
 // For custom vertex types (voxels, particles, terrain)
 // IMPORTANT: vertexLayout() must be called before vertices()
 RawMesh::create(device)
-    .vertexLayout(VkVertexInputBindingDescription, vector<VkVertexInputAttributeDescription>)  // REQUIRED first
-    .vertices(void* data, size_t count)       // count = number of vertices (not bytes!)
-    .indices(uint32_t* data, size_t count)    // 32-bit indices
-    .indices(uint16_t* data, size_t count)    // 16-bit indices (more efficient for <65K vertices)
-    .reserveCapacity(float multiplier)         // For in-place updates
+    .vertexLayout(stride)                      // Stride in bytes (REQUIRED first)
+    .vertices(void* data, size_t count)        // count = number of vertices (not bytes!)
+    .indices(uint32_t* data, size_t count)     // 32-bit indices
+    .indices(uint16_t* data, size_t count)     // 16-bit indices (more efficient for <65K vertices)
+    .reserveCapacity(float multiplier)          // For in-place updates
     .build(cmdPool) -> RawMeshPtr
 
 RawMesh:
@@ -679,10 +704,8 @@ RawMesh:
     vertexBuffer() -> Buffer*
     indexBuffer() -> Buffer*
     indexCount() -> uint32_t
-    indexType() -> VkIndexType                 // VK_INDEX_TYPE_UINT16 or VK_INDEX_TYPE_UINT32
+    indexType() -> VkIndexType                  // VK_INDEX_TYPE_UINT16 or VK_INDEX_TYPE_UINT32
     vertexStride() -> uint32_t
-    bindingDescription() -> VkVertexInputBindingDescription&
-    attributeDescriptions() -> vector<VkVertexInputAttributeDescription>&
 
     // Rendering
     bind(CommandBuffer&)
@@ -696,21 +719,29 @@ RawMesh:
 
 **Usage Pattern**:
 ```cpp
-// Define custom vertex
+// Define custom vertex with pipeline-compatible methods
 struct ChunkVertex {
     vec3 position;
     vec3 normal;
     vec2 texCoord;
     float ao;  // Custom field
 
-    static VkVertexInputBindingDescription bindingDescription();
-    static vector<VkVertexInputAttributeDescription> attributeDescriptions();
+    static VkVertexInputBindingDescription getBindingDescription() {
+        return {0, sizeof(ChunkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+    }
+    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions() {
+        return {{
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, position)},
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, normal)},
+            {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ChunkVertex, texCoord)},
+            {3, 0, VK_FORMAT_R32_SFLOAT, offsetof(ChunkVertex, ao)}
+        }};
+    }
 };
 
 // Create with 32-bit indices
 auto mesh = RawMesh::create(device)
-    .vertexLayout(ChunkVertex::bindingDescription(),
-                  ChunkVertex::attributeDescriptions())
+    .vertexLayout(sizeof(ChunkVertex))        // Stride only
     .vertices(data.data(), data.size())       // count, not bytes!
     .indices(indices.data(), indices.size())
     .reserveCapacity(1.5f)
@@ -719,8 +750,7 @@ auto mesh = RawMesh::create(device)
 // Or with 16-bit indices (more efficient for small meshes)
 std::vector<uint16_t> indices16;
 auto smallMesh = RawMesh::create(device)
-    .vertexLayout(ChunkVertex::bindingDescription(),
-                  ChunkVertex::attributeDescriptions())
+    .vertexLayout(sizeof(ChunkVertex))
     .vertices(data.data(), data.size())
     .indices(indices16.data(), indices16.size())  // 16-bit version
     .reserveCapacity(1.5f)
@@ -857,18 +887,19 @@ for (uint32_t i = 0; i < frameCount; i++) {
 
 // Pipeline layout and binding
 auto pipelineLayout = PipelineLayout::create(device)
-    .descriptorSetLayout(layout.get())
+    .addDescriptorSetLayout(layout->handle())
     .build();
 DescriptorBinding descriptors(*renderer, *pipelineLayout, sets);
 
-auto pipeline = GraphicsPipeline::create(device, renderer->renderPass())
+// IMPORTANT: create() takes device, renderPass, AND pipelineLayout
+auto pipeline = GraphicsPipeline::create(device, renderer->renderPass(), pipelineLayout)
     .vertexShader("shader.vert.spv")
     .fragmentShader("shader.frag.spv")
     .vertexInput<Vertex>()
-    .viewport(extent.width, extent.height)
-    .depthTest(true)
-    .msaa(renderer->msaaSamples())
-    .layout(pipelineLayout.get())
+    .enableDepth()
+    .cullBack()
+    .samples(renderer->msaaSamples())
+    .dynamicViewportAndScissor()
     .build();
 
 // Loop - no manual frame index management needed
@@ -981,33 +1012,87 @@ while (running) {
 ### Camera - View/Projection System
 
 ```cpp
-Camera::create() -> CameraPtr
+Camera()  // Default constructor
 
 Camera:
-    // Position and orientation
-    setPosition(vec3)
-    setRotation(quat)
-    lookAt(eye, target, up)
-
-    // Projection
-    setPerspective(fov, aspect, near, far)
+    // Projection configuration
+    setPerspective(fovDegrees, aspect, near, far)
     setOrthographic(left, right, bottom, top, near, far)
 
-    // Matrices
-    view() -> mat4
-    projection() -> mat4
+    // Position control (float)
+    move(vec3 delta)               // Move in world space
+    moveTo(vec3 position)          // Set absolute position
 
-    // Frustum culling
-    isVisible(AABB) -> bool
+    // Position control (double - for large worlds)
+    move(dvec3 delta)              // Auto-enables high-precision mode
+    moveTo(dvec3 position)         // Auto-enables high-precision mode
 
     // Movement helpers
-    move(vec3 offset)
-    rotate(vec3 euler)
+    moveForward(float distance)
+    moveBackward(float distance)
+    moveRight(float distance)
+    moveLeft(float distance)
+    moveUp(float distance)
+    moveDown(float distance)
 
-    // State
-    position() -> vec3
-    rotation() -> quat
-    forward/right/up() -> vec3
+    // Orientation
+    rotate(pitch, yaw, roll=0)     // Degrees
+    rotatePitch(degrees)
+    rotateYaw(degrees)
+    rotateRoll(degrees)
+    lookAt(target, worldUp=Y)
+    setOrientation(forward, up)
+
+    // State update (call after changes)
+    updateState()
+
+    // Accessors
+    state() -> CameraState&        // Call updateState() first
+    position() -> vec3&            // Float32 position
+    positionD() -> dvec3&          // Double-precision position
+    hasHighPrecisionPosition() -> bool
+    forward() -> vec3&
+    up() -> vec3&
+    right() -> vec3
+
+struct CameraState {
+    mat4 view;                     // Standard view matrix
+    mat4 projection;
+    mat4 viewProjection;
+    vec3 position;                 // Float32 for GPU uniforms
+    mat4 viewRelative;             // View matrix with camera at origin (rotation only)
+    array<vec4, 6> frustumPlanes;  // For culling
+};
+
+struct AABB {
+    vec3 min, max;
+    intersectsFrustum(frustumPlanes) -> bool
+    transform(mat4) -> AABB
+    center() -> vec3
+    extents() -> vec3
+    static fromCenterExtents(center, extents) -> AABB
+    static fromMinMax(min, max) -> AABB
+};
+```
+
+**Double-Precision Usage** (for large worlds):
+```cpp
+Camera camera;
+camera.setPerspective(75.0f, aspect, 0.1f, 1000.0f);
+
+// Double-precision automatically enables high-precision mode
+glm::dvec3 playerPos{1000000.0, 64.0, 1000000.0};
+camera.moveTo(playerPos);
+camera.updateState();
+
+// For view-relative rendering:
+auto viewRelative = camera.state().viewRelative;  // Rotation only
+auto projection = camera.state().projection;
+
+// Per-object offset (computed on CPU with doubles):
+glm::dvec3 objectWorldPos = ...;
+glm::vec3 viewRelOffset = glm::vec3(objectWorldPos - camera.positionD());
+// Pass viewRelOffset to shader as push constant
 ```
 
 ### RenderAgent - Organized Rendering
@@ -1040,11 +1125,12 @@ Renderable:
 include/finevk/
   core/         instance.hpp, surface.hpp, types.hpp, logging.hpp
   device/       physical_device.hpp, logical_device.hpp, buffer.hpp,
-                image.hpp, sampler.hpp, memory.hpp, command.hpp
+                buffer_pool.hpp, staging_pool.hpp, image.hpp,
+                sampler.hpp, memory.hpp, command.hpp
   rendering/    swapchain.hpp, renderpass.hpp, framebuffer.hpp,
-                pipeline.hpp, descriptors.hpp, sync.hpp
-  high/         simple_renderer.hpp, texture.hpp, mesh.hpp,
-                uniform_buffer.hpp, vertex.hpp
+                render_target.hpp, pipeline.hpp, descriptors.hpp, sync.hpp
+  high/         simple_renderer.hpp, texture.hpp, mesh.hpp, raw_mesh.hpp,
+                material.hpp, uniform_buffer.hpp, vertex.hpp
   engine/       asset_loader.hpp, camera.hpp, render_agent.hpp,
                 frame_clock.hpp, game_loop.hpp, deferred_disposer.hpp
   window/       window.hpp
@@ -1055,5 +1141,5 @@ src/            (implementation files mirror include structure)
 examples/       hello_triangle/, viking_room/, asset_loader/
 tests/          test_phase1.cpp - test_phase4.cpp
 docs/           ARCHITECTURE.md, USER_GUIDE.md, USER_GUIDE_LLM.md,
-                DESIGN.md, ASSET_LOADER_SPEC.md, ASSET_LOADER_FINAL.md
+                DESIGN.md, ASSET_LOADER_SPEC.md, FINEVOX_RESPONSE.md
 ```

@@ -28,5 +28,12 @@ add_executable(test_phase4
 
 target_link_libraries(test_phase4 PRIVATE finevk-core)
 
+# Phase 5 test - Camera Double-Precision & Pipeline Conveniences
+add_executable(test_phase5
+    test_phase5.cpp
+)
+
+target_link_libraries(test_phase5 PRIVATE finevk-core finevk-engine)
+
 # Copy any required resources
-# (none for Phase 1/2/3/4)
+# (none for Phase 1/2/3/4/5)

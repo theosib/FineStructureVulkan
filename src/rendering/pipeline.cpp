@@ -168,6 +168,85 @@ GraphicsPipeline::Builder::Builder(LogicalDevice* device, RenderPass* renderPass
     : device_(device), renderPass_(renderPass), layout_(layout) {
 }
 
+GraphicsPipeline::Builder::Builder(Builder&& other) noexcept
+    : device_(other.device_)
+    , renderPass_(other.renderPass_)
+    , layout_(other.layout_)
+    , shaderStages_(std::move(other.shaderStages_))
+    , ownedShaders_(std::move(other.ownedShaders_))
+    , vertexBindings_(std::move(other.vertexBindings_))
+    , vertexAttributes_(std::move(other.vertexAttributes_))
+    , topology_(other.topology_)
+    , primitiveRestart_(other.primitiveRestart_)
+    , polygonMode_(other.polygonMode_)
+    , cullMode_(other.cullMode_)
+    , frontFace_(other.frontFace_)
+    , lineWidth_(other.lineWidth_)
+    , depthBiasEnable_(other.depthBiasEnable_)
+    , depthBiasConstant_(other.depthBiasConstant_)
+    , depthBiasClamp_(other.depthBiasClamp_)
+    , depthBiasSlope_(other.depthBiasSlope_)
+    , samples_(other.samples_)
+    , sampleShadingEnable_(other.sampleShadingEnable_)
+    , minSampleShading_(other.minSampleShading_)
+    , depthTestEnable_(other.depthTestEnable_)
+    , depthWriteEnable_(other.depthWriteEnable_)
+    , depthCompareOp_(other.depthCompareOp_)
+    , depthBoundsTestEnable_(other.depthBoundsTestEnable_)
+    , depthBoundsMin_(other.depthBoundsMin_)
+    , depthBoundsMax_(other.depthBoundsMax_)
+    , blendEnable_(other.blendEnable_)
+    , srcColorBlendFactor_(other.srcColorBlendFactor_)
+    , dstColorBlendFactor_(other.dstColorBlendFactor_)
+    , colorBlendOp_(other.colorBlendOp_)
+    , srcAlphaBlendFactor_(other.srcAlphaBlendFactor_)
+    , dstAlphaBlendFactor_(other.dstAlphaBlendFactor_)
+    , alphaBlendOp_(other.alphaBlendOp_)
+    , dynamicStates_(std::move(other.dynamicStates_))
+    , subpass_(other.subpass_) {
+}
+
+GraphicsPipeline::Builder& GraphicsPipeline::Builder::operator=(Builder&& other) noexcept {
+    if (this != &other) {
+        device_ = other.device_;
+        renderPass_ = other.renderPass_;
+        layout_ = other.layout_;
+        shaderStages_ = std::move(other.shaderStages_);
+        ownedShaders_ = std::move(other.ownedShaders_);
+        vertexBindings_ = std::move(other.vertexBindings_);
+        vertexAttributes_ = std::move(other.vertexAttributes_);
+        topology_ = other.topology_;
+        primitiveRestart_ = other.primitiveRestart_;
+        polygonMode_ = other.polygonMode_;
+        cullMode_ = other.cullMode_;
+        frontFace_ = other.frontFace_;
+        lineWidth_ = other.lineWidth_;
+        depthBiasEnable_ = other.depthBiasEnable_;
+        depthBiasConstant_ = other.depthBiasConstant_;
+        depthBiasClamp_ = other.depthBiasClamp_;
+        depthBiasSlope_ = other.depthBiasSlope_;
+        samples_ = other.samples_;
+        sampleShadingEnable_ = other.sampleShadingEnable_;
+        minSampleShading_ = other.minSampleShading_;
+        depthTestEnable_ = other.depthTestEnable_;
+        depthWriteEnable_ = other.depthWriteEnable_;
+        depthCompareOp_ = other.depthCompareOp_;
+        depthBoundsTestEnable_ = other.depthBoundsTestEnable_;
+        depthBoundsMin_ = other.depthBoundsMin_;
+        depthBoundsMax_ = other.depthBoundsMax_;
+        blendEnable_ = other.blendEnable_;
+        srcColorBlendFactor_ = other.srcColorBlendFactor_;
+        dstColorBlendFactor_ = other.dstColorBlendFactor_;
+        colorBlendOp_ = other.colorBlendOp_;
+        srcAlphaBlendFactor_ = other.srcAlphaBlendFactor_;
+        dstAlphaBlendFactor_ = other.dstAlphaBlendFactor_;
+        alphaBlendOp_ = other.alphaBlendOp_;
+        dynamicStates_ = std::move(other.dynamicStates_);
+        subpass_ = other.subpass_;
+    }
+    return *this;
+}
+
 GraphicsPipeline::Builder& GraphicsPipeline::Builder::vertexShader(
     ShaderModule* module, const char* entryPoint) {
     VkPipelineShaderStageCreateInfo stageInfo{};
@@ -187,6 +266,22 @@ GraphicsPipeline::Builder& GraphicsPipeline::Builder::fragmentShader(
     stageInfo.module = module->handle();
     stageInfo.pName = entryPoint;
     shaderStages_.push_back(stageInfo);
+    return *this;
+}
+
+GraphicsPipeline::Builder& GraphicsPipeline::Builder::vertexShader(
+    const std::string& path, const char* entryPoint) {
+    auto shader = ShaderModule::fromFile(device_, path);
+    vertexShader(shader.get(), entryPoint);
+    ownedShaders_.push_back(std::move(shader));
+    return *this;
+}
+
+GraphicsPipeline::Builder& GraphicsPipeline::Builder::fragmentShader(
+    const std::string& path, const char* entryPoint) {
+    auto shader = ShaderModule::fromFile(device_, path);
+    fragmentShader(shader.get(), entryPoint);
+    ownedShaders_.push_back(std::move(shader));
     return *this;
 }
 

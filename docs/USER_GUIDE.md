@@ -75,13 +75,14 @@ auto device = physicalDevice.createLogicalDevice()
 Complex objects use builders for readable construction:
 
 ```cpp
-auto pipeline = GraphicsPipeline::create(device, renderPass)
+auto pipeline = GraphicsPipeline::create(device, renderPass, pipelineLayout)
     .vertexShader("shaders/vert.spv")
     .fragmentShader("shaders/frag.spv")
     .vertexInput<Vertex>()
-    .viewport(800, 600)
-    .depthTest(true)
-    .msaa(VK_SAMPLE_COUNT_4_BIT)
+    .enableDepth()
+    .cullBack()
+    .samples(VK_SAMPLE_COUNT_4_BIT)
+    .dynamicViewportAndScissor()
     .build();
 ```
 
@@ -281,7 +282,7 @@ auto quad = finevk::Mesh::Builder(device, commandPool)
 auto bounds = mesh->boundingBox();  // {min, max}
 ```
 
-### Custom Vertex Formats (RawMesh - Planned)
+### Custom Vertex Formats (RawMesh)
 
 For specialized rendering (voxels, particles, terrain), `RawMesh` supports custom vertex formats:
 
@@ -293,17 +294,17 @@ struct ChunkVertex {
     glm::vec2 texCoord;
     float ao;  // Ambient occlusion - custom field!
 
-    static VkVertexInputBindingDescription bindingDescription() {
+    static VkVertexInputBindingDescription getBindingDescription() {
         return {0, sizeof(ChunkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
     }
 
-    static std::vector<VkVertexInputAttributeDescription> attributeDescriptions() {
-        return {
+    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions() {
+        return {{
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, position)},
             {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ChunkVertex, normal)},
             {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ChunkVertex, texCoord)},
             {3, 0, VK_FORMAT_R32_SFLOAT, offsetof(ChunkVertex, ao)}
-        };
+        }};
     }
 };
 
@@ -312,17 +313,16 @@ std::vector<ChunkVertex> vertices = generateChunkMesh();
 std::vector<uint32_t> indices = generateIndices();
 
 auto mesh = finevk::RawMesh::create(device)
-    .vertexLayout(ChunkVertex::bindingDescription(),
-                  ChunkVertex::attributeDescriptions())
-    .vertices(vertices.data(), vertices.size() * sizeof(ChunkVertex))
+    .vertexLayout(sizeof(ChunkVertex))  // Stride
+    .vertices(vertices.data(), vertices.size())  // Count, not bytes!
     .indices(indices.data(), indices.size())
     .reserveCapacity(1.5f)  // 50% extra for updates
     .build(commandPool);
 
 // Update mesh in-place (great for voxel chunks)
-if (mesh->canUpdateInPlace(newVertexBytes, newIndexCount)) {
-    mesh->update(*commandPool, newData.data(), newVertexBytes,
-                 newIndices.data(), newIndexCount);
+if (mesh->canUpdateInPlace(newVertices.size(), newIndices.size())) {
+    mesh->update(*commandPool, newVertices.data(), newVertices.size(),
+                 newIndices.data(), newIndices.size());
 }
 
 // Render
@@ -333,8 +333,6 @@ mesh->draw(cmd);
 **When to use RawMesh vs Mesh:**
 - **Mesh**: Standard 3D models, OBJ files, vertex deduplication, bounds calculation
 - **RawMesh**: Custom vertex formats, bulk data, frequent updates (voxels, particles)
-
-**Note**: RawMesh is planned for an upcoming release. See [VOXEL_INTEGRATION_PLAN.md](VOXEL_INTEGRATION_PLAN.md).
 
 ### Async Asset Loading (Recommended for Games)
 
@@ -471,16 +469,21 @@ finevk::DescriptorWriter(device)
 ### Basic Pipeline
 
 ```cpp
-auto pipeline = finevk::GraphicsPipeline::create(device, renderPass)
-    .vertexShader("shaders/basic.vert.spv")
+// First create a pipeline layout
+auto pipelineLayout = finevk::PipelineLayout::create(device)
+    .addDescriptorSetLayout(descriptorLayout->handle())
+    .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants))
+    .build();
+
+// Then create the pipeline (requires device, renderPass, AND pipelineLayout)
+auto pipeline = finevk::GraphicsPipeline::create(device, renderPass, pipelineLayout)
+    .vertexShader("shaders/basic.vert.spv")      // Load from path
     .fragmentShader("shaders/basic.frag.spv")
-    .vertexInput<finevk::Vertex>()
-    .viewport(extent.width, extent.height)
-    .cullMode(VK_CULL_MODE_BACK_BIT)
+    .vertexInput<MyVertex>()                      // Templated vertex setup
+    .enableDepth()                                // Depth test + write + LESS
+    .cullBack()                                   // Cull back faces
     .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
-    .depthTest(true)
-    .depthWrite(true)
-    .layout(pipelineLayout.get())
+    .dynamicViewportAndScissor()                 // Dynamic state
     .build();
 ```
 
@@ -488,17 +491,26 @@ auto pipeline = finevk::GraphicsPipeline::create(device, renderPass)
 
 | Method | Description |
 |--------|-------------|
-| `.vertexShader(path)` | Vertex shader SPIR-V |
-| `.fragmentShader(path)` | Fragment shader SPIR-V |
-| `.vertexInput<T>()` | Vertex format from type |
-| `.viewport(w, h)` | Viewport and scissor |
-| `.topology(topo)` | Primitive type |
-| `.cullMode(mode)` | Face culling |
+| `.vertexShader(path)` | Load vertex shader from SPIR-V file |
+| `.vertexShader(module)` | Use existing ShaderModule |
+| `.fragmentShader(path)` | Load fragment shader from SPIR-V file |
+| `.fragmentShader(module)` | Use existing ShaderModule |
+| `.vertexInput<T>()` | Vertex format from type (requires `getBindingDescription()` and `getAttributeDescriptions()`) |
+| `.vertexBinding(...)` | Manual vertex binding setup |
+| `.vertexAttribute(...)` | Manual vertex attribute setup |
+| `.topology(topo)` | Primitive type (default: triangle list) |
+| `.cullBack()` | Cull back faces |
+| `.cullFront()` | Cull front faces |
+| `.cullNone()` | Disable culling |
+| `.cullMode(mode)` | Custom cull mode |
 | `.polygonMode(mode)` | Fill/line/point |
-| `.depthTest(bool)` | Enable depth testing |
-| `.depthWrite(bool)` | Write to depth buffer |
-| `.msaa(samples)` | Multi-sampling |
-| `.blend(bool)` | Alpha blending |
+| `.enableDepth()` | Enable depth test + write + LESS compare |
+| `.depthTest(bool)` | Enable/disable depth testing |
+| `.depthWrite(bool)` | Enable/disable depth writing |
+| `.samples(count)` | Multi-sampling sample count |
+| `.alphaBlending()` | Standard alpha blending |
+| `.blending(bool)` | Enable/disable blending |
+| `.dynamicViewportAndScissor()` | Dynamic viewport and scissor |
 
 ---
 

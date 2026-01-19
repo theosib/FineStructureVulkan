@@ -45,6 +45,10 @@ struct CameraState {
     glm::mat4 viewProjection{1.0f};
     glm::vec3 position{0.0f, 0.0f, 0.0f};
 
+    /// View matrix with camera at origin (rotation only)
+    /// Use this for view-relative rendering at large world coordinates
+    glm::mat4 viewRelative{1.0f};
+
     /// Frustum planes in world space (left, right, bottom, top, near, far)
     /// Planes point inward (negative half-space is inside frustum)
     std::array<glm::vec4, 6> frustumPlanes;
@@ -111,9 +115,11 @@ public:
 
     /// Move by delta in world space
     void move(const glm::vec3& delta);
+    void move(const glm::dvec3& delta);
 
     /// Set absolute position in world space
     void moveTo(const glm::vec3& position);
+    void moveTo(const glm::dvec3& position);
 
     /// Move forward along camera's forward vector
     void moveForward(float distance);
@@ -181,23 +187,32 @@ public:
     /// Get current camera state (call updateState() first if camera moved)
     const CameraState& state() const { return state_; }
 
-    /// Get current position
-    const glm::vec3& position() const { return position_; }
+    /// Get current position (float, truncated if using double-precision)
+    const glm::vec3& position() const;
+
+    /// Get current position (double-precision)
+    const glm::dvec3& positionD() const;
+
+    /// Check if using double-precision position
+    bool hasHighPrecisionPosition() const;
 
     /// Get current forward vector (direction camera is facing)
-    const glm::vec3& forward() const { return forward_; }
+    const glm::vec3& forward() const;
 
     /// Get current up vector
-    const glm::vec3& up() const { return up_; }
+    const glm::vec3& up() const;
 
     /// Get current right vector
-    glm::vec3 right() const { return glm::cross(forward_, up_); }
+    glm::vec3 right() const;
 
 private:
     void extractFrustumPlanes();
+    void computeViewRelativeMatrix();
 
     // Position and orientation
     glm::vec3 position_{0.0f, 0.0f, 0.0f};
+    glm::dvec3 positionD_{0.0, 0.0, 0.0};   // Double-precision position
+    bool useHighPrecision_ = false;          // True if positionD_ is authoritative
     glm::vec3 forward_{0.0f, 0.0f, -1.0f};  // -Z in OpenGL/Vulkan
     glm::vec3 up_{0.0f, 1.0f, 0.0f};
 

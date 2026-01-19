@@ -147,19 +147,70 @@ public:
     public:
         Builder(LogicalDevice* device, RenderPass* renderPass, PipelineLayout* layout);
 
+        // Movable (owns shader modules)
+        Builder(Builder&& other) noexcept;
+        Builder& operator=(Builder&& other) noexcept;
+
+        // Non-copyable (owns shader modules)
+        Builder(const Builder&) = delete;
+        Builder& operator=(const Builder&) = delete;
+
         // Shader stages
         Builder& vertexShader(ShaderModule* module, const char* entryPoint = "main");
         Builder& vertexShader(ShaderModule& module, const char* entryPoint = "main") { return vertexShader(&module, entryPoint); }
         Builder& vertexShader(const ShaderModulePtr& module, const char* entryPoint = "main") { return vertexShader(module.get(), entryPoint); }
+        /// Load vertex shader from SPIR-V file path
+        Builder& vertexShader(const std::string& path, const char* entryPoint = "main");
         Builder& fragmentShader(ShaderModule* module, const char* entryPoint = "main");
         Builder& fragmentShader(ShaderModule& module, const char* entryPoint = "main") { return fragmentShader(&module, entryPoint); }
         Builder& fragmentShader(const ShaderModulePtr& module, const char* entryPoint = "main") { return fragmentShader(module.get(), entryPoint); }
+        /// Load fragment shader from SPIR-V file path
+        Builder& fragmentShader(const std::string& path, const char* entryPoint = "main");
 
         // Vertex input
         Builder& vertexBinding(uint32_t binding, uint32_t stride,
                                VkVertexInputRate inputRate = VK_VERTEX_INPUT_RATE_VERTEX);
         Builder& vertexAttribute(uint32_t location, uint32_t binding,
                                  VkFormat format, uint32_t offset);
+
+        /**
+         * @brief Configure vertex input from a vertex type
+         *
+         * The vertex type T must have static methods:
+         * - static VkVertexInputBindingDescription getBindingDescription()
+         * - static std::array<VkVertexInputAttributeDescription, N> getAttributeDescriptions()
+         *
+         * Example:
+         * @code
+         * struct Vertex {
+         *     glm::vec3 pos;
+         *     glm::vec2 uv;
+         *
+         *     static VkVertexInputBindingDescription getBindingDescription() {
+         *         return {0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
+         *     }
+         *     static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+         *         return {{
+         *             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)},
+         *             {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)}
+         *         }};
+         *     }
+         * };
+         *
+         * builder.vertexInput<Vertex>()
+         * @endcode
+         */
+        template<typename T>
+        Builder& vertexInput() {
+            auto binding = T::getBindingDescription();
+            vertexBindings_.push_back(binding);
+
+            auto attributes = T::getAttributeDescriptions();
+            for (const auto& attr : attributes) {
+                vertexAttributes_.push_back(attr);
+            }
+            return *this;
+        }
 
         // Input assembly
         Builder& topology(VkPrimitiveTopology topology);
@@ -171,6 +222,13 @@ public:
         Builder& frontFace(VkFrontFace face);
         Builder& lineWidth(float width);
         Builder& depthBias(float constantFactor, float clamp, float slopeFactor);
+
+        /// Convenience: Cull back faces (default)
+        Builder& cullBack() { return cullMode(VK_CULL_MODE_BACK_BIT); }
+        /// Convenience: Cull front faces
+        Builder& cullFront() { return cullMode(VK_CULL_MODE_FRONT_BIT); }
+        /// Convenience: Disable culling
+        Builder& cullNone() { return cullMode(VK_CULL_MODE_NONE); }
 
         // Multisampling
         Builder& samples(VkSampleCountFlagBits count);
@@ -212,6 +270,8 @@ public:
 
         // Shader stages
         std::vector<VkPipelineShaderStageCreateInfo> shaderStages_;
+        // Owned shader modules (when loaded from path)
+        std::vector<ShaderModulePtr> ownedShaders_;
 
         // Vertex input
         std::vector<VkVertexInputBindingDescription> vertexBindings_;

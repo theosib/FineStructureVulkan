@@ -113,22 +113,50 @@ void Camera::setOrthographic(float left, float right, float bottom, float top,
 
 void Camera::move(const glm::vec3& delta) {
     position_ += delta;
+    if (useHighPrecision_) {
+        positionD_ += glm::dvec3(delta);
+    }
+}
+
+void Camera::move(const glm::dvec3& delta) {
+    useHighPrecision_ = true;
+    positionD_ += delta;
+    position_ = glm::vec3(positionD_);
 }
 
 void Camera::moveTo(const glm::vec3& position) {
     position_ = position;
+    useHighPrecision_ = false;
+}
+
+void Camera::moveTo(const glm::dvec3& position) {
+    useHighPrecision_ = true;
+    positionD_ = position;
+    position_ = glm::vec3(position);
 }
 
 void Camera::moveForward(float distance) {
-    position_ += forward_ * distance;
+    glm::vec3 delta = forward_ * distance;
+    position_ += delta;
+    if (useHighPrecision_) {
+        positionD_ += glm::dvec3(delta);
+    }
 }
 
 void Camera::moveRight(float distance) {
-    position_ += glm::cross(forward_, up_) * distance;
+    glm::vec3 delta = glm::cross(forward_, up_) * distance;
+    position_ += delta;
+    if (useHighPrecision_) {
+        positionD_ += glm::dvec3(delta);
+    }
 }
 
 void Camera::moveUp(float distance) {
-    position_ += up_ * distance;
+    glm::vec3 delta = up_ * distance;
+    position_ += delta;
+    if (useHighPrecision_) {
+        positionD_ += glm::dvec3(delta);
+    }
 }
 
 // =============================================================================
@@ -178,6 +206,17 @@ void Camera::setOrientation(const glm::vec3& forward, const glm::vec3& up) {
 }
 
 // =============================================================================
+// Accessors
+// =============================================================================
+
+const glm::vec3& Camera::position() const { return position_; }
+const glm::dvec3& Camera::positionD() const { return positionD_; }
+bool Camera::hasHighPrecisionPosition() const { return useHighPrecision_; }
+const glm::vec3& Camera::forward() const { return forward_; }
+const glm::vec3& Camera::up() const { return up_; }
+glm::vec3 Camera::right() const { return glm::cross(forward_, up_); }
+
+// =============================================================================
 // State Update
 // =============================================================================
 
@@ -188,11 +227,21 @@ void Camera::updateState() {
     // Compute view matrix
     state_.view = glm::lookAt(position_, position_ + forward_, up_);
 
+    // Compute view-relative matrix (rotation only, camera at origin)
+    computeViewRelativeMatrix();
+
     // Compute view-projection matrix
     state_.viewProjection = state_.projection * state_.view;
 
     // Extract frustum planes
     extractFrustumPlanes();
+}
+
+void Camera::computeViewRelativeMatrix() {
+    // View-relative matrix: same rotation as view matrix, but camera at origin
+    // This is useful for large-world rendering where the camera position
+    // would lose precision in float32
+    state_.viewRelative = glm::lookAt(glm::vec3(0.0f), forward_, up_);
 }
 
 void Camera::extractFrustumPlanes() {
