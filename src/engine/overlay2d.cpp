@@ -57,7 +57,6 @@ Overlay2D::Overlay2D(Overlay2D&& other) noexcept
     , msaaSamples_(other.msaaSamples_)
     , descriptorSetLayout_(std::move(other.descriptorSetLayout_))
     , descriptorPool_(std::move(other.descriptorPool_))
-    , descriptorSets_(std::move(other.descriptorSets_))
     , uniformBuffers_(std::move(other.uniformBuffers_))
     , pipelineLayout_(std::move(other.pipelineLayout_))
     , pipeline_(std::move(other.pipeline_))
@@ -70,7 +69,9 @@ Overlay2D::Overlay2D(Overlay2D&& other) noexcept
     , screenHeight_(other.screenHeight_)
     , projection_(other.projection_)
     , batch_(std::move(other.batch_))
-    , lastBoundTexture_(other.lastBoundTexture_)
+    , textureDescriptorCache_(std::move(other.textureDescriptorCache_))
+    , textureDescriptorPool_(std::move(other.textureDescriptorPool_))
+    , nextPoolIndex_(other.nextPoolIndex_)
 {
     other.device_ = nullptr;
 }
@@ -88,7 +89,6 @@ Overlay2D& Overlay2D::operator=(Overlay2D&& other) noexcept {
         msaaSamples_ = other.msaaSamples_;
         descriptorSetLayout_ = std::move(other.descriptorSetLayout_);
         descriptorPool_ = std::move(other.descriptorPool_);
-        descriptorSets_ = std::move(other.descriptorSets_);
         uniformBuffers_ = std::move(other.uniformBuffers_);
         pipelineLayout_ = std::move(other.pipelineLayout_);
         pipeline_ = std::move(other.pipeline_);
@@ -101,7 +101,9 @@ Overlay2D& Overlay2D::operator=(Overlay2D&& other) noexcept {
         screenHeight_ = other.screenHeight_;
         projection_ = other.projection_;
         batch_ = std::move(other.batch_);
-        lastBoundTexture_ = other.lastBoundTexture_;
+        textureDescriptorCache_ = std::move(other.textureDescriptorCache_);
+        textureDescriptorPool_ = std::move(other.textureDescriptorPool_);
+        nextPoolIndex_ = other.nextPoolIndex_;
 
         other.device_ = nullptr;
     }
@@ -125,12 +127,17 @@ void Overlay2D::createDescriptorResources() {
         .combinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    // Create descriptor pool
-    descriptorPool_ = DescriptorPool::fromLayout(descriptorSetLayout_.get(), framesInFlight_)
+    // Create descriptor pool sized for:
+    // - MAX_TEXTURES_PER_FRAME * framesInFlight_ descriptor sets for texture variations
+    uint32_t totalSets = MAX_TEXTURES_PER_FRAME * framesInFlight_;
+    descriptorPool_ = DescriptorPool::create(device_)
+        .maxSets(totalSets)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, totalSets)
+        .poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, totalSets)
         .build();
 
-    // Allocate descriptor sets (one per frame)
-    descriptorSets_ = descriptorPool_->allocate(descriptorSetLayout_.get(), framesInFlight_);
+    // Pre-allocate texture descriptor pool (for per-texture descriptor sets)
+    textureDescriptorPool_ = descriptorPool_->allocate(descriptorSetLayout_.get(), totalSets);
 
     // Create uniform buffers (one per frame)
     uniformBuffers_.reserve(framesInFlight_);
@@ -144,13 +151,20 @@ void Overlay2D::createDescriptorResources() {
         .addressMode(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
         .build();
 
-    // Write initial descriptor sets
+    // Pre-write uniform buffer to all texture pool descriptor sets
+    // The texture binding will be written on-demand in render()
     DescriptorWriter writer(device_);
-    for (uint32_t i = 0; i < framesInFlight_; i++) {
-        writer.writeBuffer(descriptorSets_[i], 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                          *uniformBuffers_[i]);
-        writer.writeImage(descriptorSets_[i], 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                         whiteTexture_->view(), sampler_.get());
+    for (uint32_t frame = 0; frame < framesInFlight_; frame++) {
+        for (uint32_t tex = 0; tex < MAX_TEXTURES_PER_FRAME; tex++) {
+            uint32_t poolIndex = frame * MAX_TEXTURES_PER_FRAME + tex;
+            writer.writeBuffer(textureDescriptorPool_[poolIndex], 0,
+                              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                              *uniformBuffers_[frame]);
+            // Write white texture as default (will be overwritten when needed)
+            writer.writeImage(textureDescriptorPool_[poolIndex], 1,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                             whiteTexture_->view(), sampler_.get());
+        }
     }
     writer.update();
 }
@@ -215,15 +229,20 @@ void Overlay2D::updateProjection(uint32_t width, uint32_t height) {
     screenWidth_ = width;
     screenHeight_ = height;
 
+    // Note: Vulkan's NDC has Y=-1 at top, Y=+1 at bottom (opposite of OpenGL).
+    // glm::ortho(left, right, bottom, top) maps [bottom,top] to NDC [-1,+1].
+    // For Vulkan with top-left origin: we want screen Y=0 at NDC Y=-1 (top).
+    // So we use bottom=0, top=height to map Y=0 to -1 and Y=height to +1.
+
     if (originTopLeft_) {
-        // Origin at top-left, Y increases downward
-        projection_ = glm::ortho(0.0f, static_cast<float>(width),
-                                 static_cast<float>(height), 0.0f,
-                                 -1.0f, 1.0f);
-    } else {
-        // Origin at bottom-left, Y increases upward (OpenGL-style)
+        // Origin at top-left, Y increases downward (Vulkan convention)
         projection_ = glm::ortho(0.0f, static_cast<float>(width),
                                  0.0f, static_cast<float>(height),
+                                 -1.0f, 1.0f);
+    } else {
+        // Origin at bottom-left, Y increases upward
+        projection_ = glm::ortho(0.0f, static_cast<float>(width),
+                                 static_cast<float>(height), 0.0f,
                                  -1.0f, 1.0f);
     }
 
@@ -236,7 +255,10 @@ void Overlay2D::updateProjection(uint32_t width, uint32_t height) {
 void Overlay2D::beginFrame(uint32_t frameIndex, uint32_t screenWidth, uint32_t screenHeight) {
     currentFrame_ = frameIndex % framesInFlight_;
     batch_.clear();
-    lastBoundTexture_ = nullptr;
+
+    // Reset texture descriptor cache for this frame
+    textureDescriptorCache_.clear();
+    nextPoolIndex_ = currentFrame_ * MAX_TEXTURES_PER_FRAME;
 
     updateProjection(screenWidth, screenHeight);
 }
@@ -332,6 +354,38 @@ void Overlay2D::drawTextCentered(const std::string& text, float centerX, float y
     drawText(text, centerX - width * 0.5f, y, font, color, scale);
 }
 
+VkDescriptorSet Overlay2D::getDescriptorForTexture(Texture* texture) {
+    // Check if we already have a descriptor set for this texture this frame
+    auto it = textureDescriptorCache_.find(texture);
+    if (it != textureDescriptorCache_.end()) {
+        return it->second;
+    }
+
+    // Need to allocate a new descriptor set from the pool
+    uint32_t poolEnd = (currentFrame_ + 1) * MAX_TEXTURES_PER_FRAME;
+    if (nextPoolIndex_ >= poolEnd) {
+        FINEVK_WARN(LogCategory::Core, "Overlay2D: Too many textures in one frame (max " +
+                    std::to_string(MAX_TEXTURES_PER_FRAME) + ")");
+        // Fall back to first descriptor set for this frame
+        return textureDescriptorPool_[currentFrame_ * MAX_TEXTURES_PER_FRAME];
+    }
+
+    VkDescriptorSet set = textureDescriptorPool_[nextPoolIndex_];
+    nextPoolIndex_++;
+
+    // Write the texture to this descriptor set
+    // Note: The uniform buffer was already written during createDescriptorResources()
+    DescriptorWriter writer(device_);
+    writer.writeImage(set, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     texture->view(), sampler_.get());
+    writer.update();
+
+    // Cache it for reuse this frame
+    textureDescriptorCache_[texture] = set;
+
+    return set;
+}
+
 void Overlay2D::render(CommandBuffer& cmd) {
     if (batch_.empty()) {
         return;
@@ -381,6 +435,7 @@ void Overlay2D::render(CommandBuffer& cmd) {
 
     // Render batches by texture
     Texture* currentTexture = nullptr;
+    VkDescriptorSet currentDescriptor = VK_NULL_HANDLE;
     uint32_t batchStart = 0;
 
     for (uint32_t i = 0; i <= batch_.size(); i++) {
@@ -389,18 +444,14 @@ void Overlay2D::render(CommandBuffer& cmd) {
         if (tex != currentTexture || i == batch_.size()) {
             // Flush previous batch
             if (i > batchStart && currentTexture != nullptr) {
-                // Update texture in descriptor set
-                if (currentTexture != lastBoundTexture_) {
-                    DescriptorWriter writer(device_);
-                    writer.writeImage(descriptorSets_[currentFrame_], 1,
-                                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                     currentTexture->view(), sampler_.get());
-                    writer.update();
-                    lastBoundTexture_ = currentTexture;
-                }
+                // Get descriptor set for this texture (uses cache, no mid-frame updates)
+                VkDescriptorSet descSet = getDescriptorForTexture(currentTexture);
 
-                // Bind descriptor set
-                cmd.bindDescriptorSet(*pipelineLayout_, descriptorSets_[currentFrame_]);
+                // Only rebind if descriptor changed
+                if (descSet != currentDescriptor) {
+                    cmd.bindDescriptorSet(*pipelineLayout_, descSet);
+                    currentDescriptor = descSet;
+                }
 
                 // Draw batch
                 uint32_t quadCount = i - batchStart;

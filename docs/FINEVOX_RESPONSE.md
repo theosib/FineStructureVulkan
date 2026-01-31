@@ -232,6 +232,51 @@ For custom per-frame resources, a simple `std::vector<T>` with a frame index is 
 
 ---
 
+## Recent Updates (January 2026)
+
+### Text Rendering System - NEW
+
+Added FontAtlas and text rendering support to Overlay2D:
+
+```cpp
+#include <finevk/engine/font_atlas.hpp>
+
+// Load TrueType font
+auto font = finevk::FontAtlas::load(device, commandPool, "fonts/PixeloidSans.ttf")
+    .pixelHeight(24.0f)
+    .build();
+
+// Draw text (via Overlay2D)
+overlay->drawText("Score: 100", x, y, *font, {1.0f, 1.0f, 1.0f, 1.0f});
+overlay->drawTextCentered("Game Over", centerX, y, *font, color, scale);
+```
+
+**Features:**
+- TrueType font loading via stb_truetype
+- Glyph metrics and kerning support
+- `measureWidth()` and `measureSize()` for layout
+- Seamlessly integrates with Overlay2D batching
+
+### Overlay2D Descriptor Set Fix - INTERNAL
+
+Fixed Vulkan validation errors caused by mid-frame descriptor set updates. The system now uses a per-texture descriptor set cache with pre-allocated pools:
+
+- Up to 16 unique textures per frame (configurable via `MAX_TEXTURES_PER_FRAME`)
+- No API changes - existing code works unchanged
+- Eliminates all "descriptor set was destroyed or updated" validation errors
+
+### Third-Party Licenses - NEW
+
+Added `THIRD_PARTY_LICENSES.md` documenting all dependencies:
+- stb_image, stb_truetype (MIT/Public Domain)
+- tinyobjloader (MIT)
+- GLFW (zlib/libpng)
+- GLM (MIT)
+- Vulkan SDK (Apache 2.0)
+- Pixeloid Sans font (SIL OFL 1.1)
+
+---
+
 ## For FineVox
 
 When updating the FineVox integration documentation, please use the correct FineVK APIs as documented in the FineVK header files. The Material and GraphicsPipeline builders work as shown above, not as originally documented in the integration guide.

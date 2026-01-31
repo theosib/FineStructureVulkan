@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace finevk {
@@ -273,7 +274,7 @@ private:
     void createPipeline(const std::string& vertPath, const std::string& fragPath);
     void createQuadMesh();
     void updateProjection(uint32_t width, uint32_t height);
-    void flushBatch(CommandBuffer& cmd);
+    VkDescriptorSet getDescriptorForTexture(Texture* texture);
 
     // Configuration
     LogicalDevice* device_ = nullptr;
@@ -287,7 +288,6 @@ private:
     // Resources
     DescriptorSetLayoutPtr descriptorSetLayout_;
     DescriptorPoolPtr descriptorPool_;
-    std::vector<VkDescriptorSet> descriptorSets_;  // Per-frame
     std::vector<BufferPtr> uniformBuffers_;        // Per-frame
     PipelineLayoutPtr pipelineLayout_;
     GraphicsPipelinePtr pipeline_;
@@ -306,7 +306,13 @@ private:
 
     // Batch state
     std::vector<OverlayQuadData> batch_;
-    Texture* lastBoundTexture_ = nullptr;
+
+    // Per-texture descriptor set management (avoids mid-frame descriptor updates)
+    // Maps texture pointer to descriptor set for current frame
+    std::unordered_map<Texture*, VkDescriptorSet> textureDescriptorCache_;
+    std::vector<VkDescriptorSet> textureDescriptorPool_;  // Pre-allocated pool
+    uint32_t nextPoolIndex_ = 0;  // Next available index in pool
+    static constexpr uint32_t MAX_TEXTURES_PER_FRAME = 16;
 };
 
 /**

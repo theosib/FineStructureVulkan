@@ -843,11 +843,38 @@ overlay->render(cmd);  // Overlay on top
 renderer->endRenderPass();
 ```
 
+**Text Rendering with FontAtlas:**
+
+```cpp
+#include <finevk/engine/font_atlas.hpp>
+
+// Load a TrueType font (once during setup)
+auto font = finevk::FontAtlas::load(device.get(), commandPool, "fonts/MyFont.ttf")
+    .pixelHeight(24.0f)     // Font size in pixels
+    .build();
+
+// In render loop, after beginFrame():
+// Draw text at position (left edge, baseline)
+overlay->drawText("Score: 100", 20.0f, 50.0f, *font, {1.0f, 1.0f, 1.0f, 1.0f});
+
+// Draw centered text
+overlay->drawTextCentered("Game Over", screenWidth/2.0f, screenHeight/2.0f, *font,
+                          {1.0f, 0.3f, 0.3f, 1.0f},  // Red color
+                          2.0f);                      // 2x scale
+```
+
+**FontAtlas Features:**
+- Loads TrueType (.ttf) fonts via stb_truetype
+- Generates texture atlas with all printable ASCII characters (32-126)
+- Provides glyph metrics for precise text layout
+- Supports kerning for professional-quality text
+- `measureWidth(text)` and `measureSize(text)` for layout calculations
+
 **Key Features:**
 - Screen-space pixel coordinates
 - Alpha blending (always on)
 - No depth testing (overlays always visible)
-- Batched by texture for efficient rendering
+- Batched by texture for efficient rendering (up to 16 unique textures per frame)
 - Custom shader support via builder
 
 **Builder Options:**
@@ -889,6 +916,7 @@ See `examples/overlay_demo/` for a 2D overlay demonstration with:
 - Health/ammo bar UI elements
 - Mini-map placeholder
 - Blinking status indicators
+- Text rendering with FontAtlas (labels, FPS counter)
 
 Build and run:
 ```bash
