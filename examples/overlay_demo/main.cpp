@@ -87,70 +87,67 @@ int main() {
         while (window->isOpen()) {
             window->pollEvents();
 
-            // Begin frame
-            auto result = renderer->beginFrame();
-            if (!result.success) {
-                continue;
+            // Begin frame - frame converts to CommandBuffer& implicitly
+            if (auto frame = renderer->beginFrame()) {
+                auto extent = renderer->extent();
+                float width = static_cast<float>(extent.width);
+                float height = static_cast<float>(extent.height);
+
+                // Begin overlay frame
+                overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
+
+                // Draw a pulsing crosshair in the center
+                float centerX = width / 2.0f;
+                float centerY = height / 2.0f;
+                float pulse = 0.7f + 0.3f * std::sin(time * 4.0f);
+                overlay->drawCrosshair(centerX, centerY, 30.0f, 3.0f,
+                                       {1.0f, 1.0f, 1.0f, pulse});
+
+                // Draw corner UI elements (simulating health/ammo bars)
+
+                // Top-left: "Health bar" background
+                overlay->drawQuad(20, 20, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+                // Top-left: "Health bar" fill (animated)
+                float health = 0.5f + 0.5f * std::sin(time * 0.5f);
+                overlay->drawQuad(22, 22, 196 * health, 21, {0.1f, 0.8f, 0.1f, 1.0f});
+
+                // Top-right: Status indicators
+                float indicatorX = width - 120;
+                overlay->drawQuad(indicatorX, 20, 100, 30, {0.1f, 0.1f, 0.3f, 0.9f});
+                // Blinking indicator
+                if (std::fmod(time, 1.0f) < 0.5f) {
+                    overlay->drawQuad(indicatorX + 10, 25, 20, 20, {1.0f, 0.3f, 0.3f, 1.0f});
+                }
+
+                // Bottom-left: "Ammo bar"
+                overlay->drawQuad(20, height - 45, 150, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+                overlay->drawQuad(22, height - 43, 100, 21, {0.3f, 0.6f, 1.0f, 1.0f});
+
+                // Bottom-right: Mini-map placeholder
+                float mapSize = 120;
+                float mapX = width - mapSize - 20;
+                float mapY = height - mapSize - 20;
+                overlay->drawQuad(mapX, mapY, mapSize, mapSize, {0.1f, 0.1f, 0.15f, 0.85f});
+                // Border
+                overlay->drawQuad(mapX, mapY, mapSize, 2, {0.5f, 0.5f, 0.5f, 1.0f});           // top
+                overlay->drawQuad(mapX, mapY + mapSize - 2, mapSize, 2, {0.5f, 0.5f, 0.5f, 1.0f}); // bottom
+                overlay->drawQuad(mapX, mapY, 2, mapSize, {0.5f, 0.5f, 0.5f, 1.0f});           // left
+                overlay->drawQuad(mapX + mapSize - 2, mapY, 2, mapSize, {0.5f, 0.5f, 0.5f, 1.0f}); // right
+
+                // Moving dot on mini-map
+                float dotX = mapX + mapSize / 2 + 30 * std::cos(time);
+                float dotY = mapY + mapSize / 2 + 30 * std::sin(time);
+                overlay->drawQuad(dotX - 4, dotY - 4, 8, 8, {1.0f, 1.0f, 0.3f, 1.0f});
+
+                // Render the frame
+                renderer->beginRenderPass({0.05f, 0.05f, 0.1f, 1.0f});
+
+                // Render overlay - pass frame directly (converts to CommandBuffer&)
+                overlay->render(frame);
+
+                renderer->endRenderPass();
+                renderer->endFrame();
             }
-
-            auto extent = renderer->extent();
-            float width = static_cast<float>(extent.width);
-            float height = static_cast<float>(extent.height);
-
-            // Begin overlay frame
-            overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
-
-            // Draw a pulsing crosshair in the center
-            float centerX = width / 2.0f;
-            float centerY = height / 2.0f;
-            float pulse = 0.7f + 0.3f * std::sin(time * 4.0f);
-            overlay->drawCrosshair(centerX, centerY, 30.0f, 3.0f,
-                                   {1.0f, 1.0f, 1.0f, pulse});
-
-            // Draw corner UI elements (simulating health/ammo bars)
-
-            // Top-left: "Health bar" background
-            overlay->drawQuad(20, 20, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
-            // Top-left: "Health bar" fill (animated)
-            float health = 0.5f + 0.5f * std::sin(time * 0.5f);
-            overlay->drawQuad(22, 22, 196 * health, 21, {0.1f, 0.8f, 0.1f, 1.0f});
-
-            // Top-right: Status indicators
-            float indicatorX = width - 120;
-            overlay->drawQuad(indicatorX, 20, 100, 30, {0.1f, 0.1f, 0.3f, 0.9f});
-            // Blinking indicator
-            if (std::fmod(time, 1.0f) < 0.5f) {
-                overlay->drawQuad(indicatorX + 10, 25, 20, 20, {1.0f, 0.3f, 0.3f, 1.0f});
-            }
-
-            // Bottom-left: "Ammo bar"
-            overlay->drawQuad(20, height - 45, 150, 25, {0.2f, 0.2f, 0.2f, 0.8f});
-            overlay->drawQuad(22, height - 43, 100, 21, {0.3f, 0.6f, 1.0f, 1.0f});
-
-            // Bottom-right: Mini-map placeholder
-            float mapSize = 120;
-            float mapX = width - mapSize - 20;
-            float mapY = height - mapSize - 20;
-            overlay->drawQuad(mapX, mapY, mapSize, mapSize, {0.1f, 0.1f, 0.15f, 0.85f});
-            // Border
-            overlay->drawQuad(mapX, mapY, mapSize, 2, {0.5f, 0.5f, 0.5f, 1.0f});           // top
-            overlay->drawQuad(mapX, mapY + mapSize - 2, mapSize, 2, {0.5f, 0.5f, 0.5f, 1.0f}); // bottom
-            overlay->drawQuad(mapX, mapY, 2, mapSize, {0.5f, 0.5f, 0.5f, 1.0f});           // left
-            overlay->drawQuad(mapX + mapSize - 2, mapY, 2, mapSize, {0.5f, 0.5f, 0.5f, 1.0f}); // right
-
-            // Moving dot on mini-map
-            float dotX = mapX + mapSize / 2 + 30 * std::cos(time);
-            float dotY = mapY + mapSize / 2 + 30 * std::sin(time);
-            overlay->drawQuad(dotX - 4, dotY - 4, 8, 8, {1.0f, 1.0f, 0.3f, 1.0f});
-
-            // Render the frame
-            renderer->beginRenderPass({0.05f, 0.05f, 0.1f, 1.0f});
-
-            // Render overlay (all the 2D quads we added)
-            overlay->render(*result.commandBuffer);
-
-            renderer->endRenderPass();
-            renderer->endFrame();
 
             time += 1.0f / 60.0f;  // Approximate frame time
         }

@@ -187,42 +187,39 @@ int main() {
         while (window->isOpen()) {
             window->pollEvents();
 
-            // Begin frame
-            auto result = renderer->beginFrame();
-            if (!result.success) {
-                continue;
+            // Begin frame - frame converts to CommandBuffer& implicitly
+            if (auto frame = renderer->beginFrame()) {
+                // Update MVP
+                auto currentTime = std::chrono::high_resolution_clock::now();
+                float time = std::chrono::duration<float>(currentTime - startTime).count();
+
+                MVPUniform mvp{};
+                mvp.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                mvp.view = glm::lookAt(
+                    glm::vec3(2.0f, 2.0f, 2.0f),
+                    glm::vec3(0.0f, 0.0f, 0.0f),
+                    glm::vec3(0.0f, 0.0f, 1.0f));
+
+                auto extent = renderer->extent();
+                float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+                mvp.projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+                mvp.projection[1][1] *= -1;  // Flip Y for Vulkan
+
+                uniformBuffer->update(renderer->currentFrame(), mvp);
+
+                // Render - pass frame directly to methods expecting CommandBuffer&
+                renderer->beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
+
+                CommandBuffer& cmd = frame;  // Implicit conversion
+                cmd.bindPipeline(pipeline);
+                descriptors.bind(cmd);
+
+                mesh->bind(cmd);
+                mesh->draw(cmd);
+
+                renderer->endRenderPass();
+                renderer->endFrame();
             }
-
-            // Update MVP
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float time = std::chrono::duration<float>(currentTime - startTime).count();
-
-            MVPUniform mvp{};
-            mvp.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            mvp.view = glm::lookAt(
-                glm::vec3(2.0f, 2.0f, 2.0f),
-                glm::vec3(0.0f, 0.0f, 0.0f),
-                glm::vec3(0.0f, 0.0f, 1.0f));
-
-            auto extent = renderer->extent();
-            float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-            mvp.projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-            mvp.projection[1][1] *= -1;  // Flip Y for Vulkan
-
-            uniformBuffer->update(renderer->currentFrame(), mvp);
-
-            // Render
-            renderer->beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
-
-            auto& cmd = *result.commandBuffer;
-            cmd.bindPipeline(pipeline);
-            descriptors.bind(cmd);
-
-            mesh->bind(cmd);
-            mesh->draw(cmd);
-
-            renderer->endRenderPass();
-            renderer->endFrame();
         }
 
         // Wait for GPU to finish before resources are destroyed

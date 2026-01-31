@@ -53,12 +53,26 @@ struct RendererConfig {
 
 /**
  * @brief Result of a frame begin operation
+ *
+ * Can be used directly in if-statements and passed to methods expecting CommandBuffer&:
+ * @code
+ * if (auto frame = renderer->beginFrame()) {
+ *     overlay->render(frame);  // Implicit conversion to CommandBuffer&
+ *     mesh->draw(frame);
+ * }
+ * @endcode
  */
 struct FrameBeginResult {
     bool success = false;
     bool resized = false;
     uint32_t imageIndex = 0;
     CommandBuffer* commandBuffer = nullptr;
+
+    /// Check if frame begin succeeded (for use in if-statements)
+    explicit operator bool() const { return success; }
+
+    /// Implicit conversion to CommandBuffer& for convenient passing to render methods
+    operator CommandBuffer&() const { return *commandBuffer; }
 };
 
 /**
