@@ -35,9 +35,12 @@ MaterialPtr Material::Builder::build() {
         throw std::runtime_error("Material must have at least one binding");
     }
 
+    // Auto-discover framesInFlight from device if not set
+    uint32_t frames = (framesInFlight_ == 0) ? device_->framesInFlight() : framesInFlight_;
+
     auto material = MaterialPtr(new Material());
     material->device_ = device_;
-    material->framesInFlight_ = framesInFlight_;
+    material->framesInFlight_ = frames;
 
     // Create descriptor set layout
     auto layoutBuilder = DescriptorSetLayout::create(device_);
@@ -48,31 +51,31 @@ MaterialPtr Material::Builder::build() {
 
     // Create descriptor pool
     auto poolBuilder = DescriptorPool::create(device_)
-        .maxSets(framesInFlight_);
+        .maxSets(frames);
     for (const auto& b : bindings_) {
-        poolBuilder.poolSize(b.type, framesInFlight_);
+        poolBuilder.poolSize(b.type, frames);
     }
     material->pool_ = poolBuilder.build();
 
     // Allocate descriptor sets (one per frame)
     material->descriptorSets_ = material->pool_->allocate(
-        material->layout_.get(), framesInFlight_);
+        material->layout_.get(), frames);
 
     // Create uniform buffers for uniform bindings
     for (const auto& b : bindings_) {
         if (b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
             // Create one buffer per frame
             std::vector<BufferPtr> buffers;
-            buffers.reserve(framesInFlight_);
+            buffers.reserve(frames);
 
-            for (uint32_t i = 0; i < framesInFlight_; i++) {
+            for (uint32_t i = 0; i < frames; i++) {
                 buffers.push_back(Buffer::createUniformBuffer(device_, b.uniformSize));
             }
 
             material->uniformBuffers_[b.binding] = std::move(buffers);
 
             // Bind uniform buffers to all descriptor sets
-            for (uint32_t i = 0; i < framesInFlight_; i++) {
+            for (uint32_t i = 0; i < frames; i++) {
                 VkDescriptorBufferInfo bufferInfo{};
                 bufferInfo.buffer = material->uniformBuffers_[b.binding][i]->handle();
                 bufferInfo.offset = 0;

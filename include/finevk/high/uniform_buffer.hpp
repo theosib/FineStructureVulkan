@@ -2,6 +2,7 @@
 
 #include "finevk/core/types.hpp"
 #include "finevk/device/buffer.hpp"
+#include "finevk/device/logical_device.hpp"
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -10,8 +11,6 @@
 #include <cstring>
 
 namespace finevk {
-
-class LogicalDevice;
 
 /**
  * @brief Type-safe uniform buffer with per-frame copies
@@ -28,18 +27,21 @@ public:
     /**
      * @brief Create uniform buffers for each frame in flight
      * @param device Logical device
-     * @param frameCount Number of frames in flight (typically 2-3)
+     * @param frameCount Number of frames in flight (0 = auto from device)
      */
     static std::unique_ptr<UniformBuffer<T>> create(
         LogicalDevice* device,
-        uint32_t frameCount = 2) {
+        uint32_t frameCount = 0) {
+
+        // Auto-discover from device if not specified
+        uint32_t frames = (frameCount == 0) ? device->framesInFlight() : frameCount;
 
         auto ub = std::unique_ptr<UniformBuffer<T>>(new UniformBuffer<T>());
         ub->device_ = device;
-        ub->frameCount_ = frameCount;
-        ub->buffers_.reserve(frameCount);
+        ub->frameCount_ = frames;
+        ub->buffers_.reserve(frames);
 
-        for (uint32_t i = 0; i < frameCount; i++) {
+        for (uint32_t i = 0; i < frames; i++) {
             auto buffer = Buffer::createUniformBuffer(device, sizeof(T));
             ub->buffers_.push_back(std::move(buffer));
         }

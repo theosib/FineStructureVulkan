@@ -216,7 +216,7 @@ auto framebuffers = SwapChainFramebuffers::create(swapChain, renderPass);
 - Pipeline integration
 
 ```cpp
-auto material = Material::create(device, framesInFlight)
+auto material = Material::create(device)  // Auto-discovers framesInFlight
     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
     .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)
     .build();

@@ -36,6 +36,7 @@ class Material;
 class RawMesh;
 class BufferPool;
 class StagingPool;
+class Overlay2D;
 
 // Smart pointer typedefs for ownership
 using InstancePtr = std::unique_ptr<Instance>;
@@ -66,6 +67,7 @@ using TexturePtr = std::unique_ptr<Texture>;
 using RawMeshPtr = std::unique_ptr<RawMesh>;
 using BufferPoolPtr = std::unique_ptr<BufferPool>;
 using StagingPoolPtr = std::unique_ptr<StagingPool>;
+using Overlay2DPtr = std::unique_ptr<Overlay2D>;
 
 // Shared pointer typedefs for shared resources
 using TextureRef = std::shared_ptr<Texture>;

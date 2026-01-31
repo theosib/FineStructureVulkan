@@ -347,6 +347,9 @@ void Window::bindDevice(LogicalDevice& device) {
 
     device_ = &device;
 
+    // Set framesInFlight on the device so other components can discover it
+    device_->setFramesInFlight(config_.framesInFlight);
+
     // Register for device destruction notification so we can clean up
     // our resources before the device is destroyed
     deviceDestructionCallbackId_ = device_->onDestruction(

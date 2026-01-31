@@ -251,6 +251,7 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/camera.cpp
         src/engine/render_agent.cpp
         src/engine/asset_loader.cpp
+        src/engine/overlay2d.cpp
     )
 
     # Engine library headers (for dependency tracking)
@@ -262,6 +263,7 @@ if(FINEVK_BUILD_ENGINE)
         include/finevk/engine/camera.hpp
         include/finevk/engine/render_agent.hpp
         include/finevk/engine/asset_loader.hpp
+        include/finevk/engine/overlay2d.hpp
     )
 
     # Helper function to configure finevk-engine target

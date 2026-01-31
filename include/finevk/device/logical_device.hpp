@@ -53,6 +53,25 @@ public:
     MemoryAllocator& allocator() { return *allocator_; }
 
     /**
+     * @brief Get the number of frames in flight
+     *
+     * Returns the number of frames that can be processed concurrently.
+     * This is typically set by Window::bindDevice() based on the swap chain
+     * configuration, but can also be set manually for headless rendering.
+     *
+     * Default is 2 if not explicitly set.
+     */
+    uint32_t framesInFlight() const { return framesInFlight_; }
+
+    /**
+     * @brief Set the number of frames in flight
+     *
+     * Normally called automatically by Window::bindDevice(). Can be called
+     * manually for headless rendering or custom swap chain setups.
+     */
+    void setFramesInFlight(uint32_t count) { framesInFlight_ = count; }
+
+    /**
      * @brief Get the default command pool
      *
      * Returns a shared command pool suitable for general-purpose graphics commands.
@@ -120,6 +139,9 @@ private:
 
     // Default resources (lazily created)
     CommandPoolPtr defaultCommandPool_;
+
+    // Frame configuration (set by Window::bindDevice or manually)
+    uint32_t framesInFlight_ = 2;
 
     // Destruction callbacks for dependent objects
     std::vector<std::pair<size_t, DestructionCallback>> destructionCallbacks_;

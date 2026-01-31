@@ -87,7 +87,7 @@ globalUBO_ = finevk::Buffer::createUniform<GlobalUBO>(device, framesInFlight_);
 FineVK actual API:
 ```cpp
 // For managed uniform buffer with per-frame instances:
-auto material = Material::create(device, framesInFlight)
+auto material = Material::create(device)  // Auto-discovers framesInFlight
     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
     .build();
 material->update<MVPUniform>(0, data);  // Auto-selects frame
@@ -110,7 +110,7 @@ blockMaterial_ = finevk::Material::create(device, framesInFlight_)
 
 FineVK actual API:
 ```cpp
-auto material = Material::create(device, framesInFlight)
+auto material = Material::create(device)  // Auto-discovers framesInFlight
     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)  // Creates internal UBO
     .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)            // Declares texture binding
     .build();

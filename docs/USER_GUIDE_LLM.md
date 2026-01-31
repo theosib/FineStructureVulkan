@@ -111,6 +111,9 @@ LogicalDevice:
     graphicsQueue() -> VkQueue
     presentQueue() -> VkQueue
     allocator() -> MemoryAllocator*
+    framesInFlight() -> uint32_t       // Auto-set by Window::bindDevice()
+    setFramesInFlight(uint32_t)        // For headless/custom setups
+    defaultCommandPool() -> CommandPool*
     waitIdle()
 ```
 
@@ -770,7 +773,8 @@ if (mesh->canUpdateInPlace(newData.size(), newIndices.size())) {
 ### UniformBuffer<T>
 
 ```cpp
-UniformBuffer<T>::create(device, frameCount) -> unique_ptr<UniformBuffer<T>>
+UniformBuffer<T>::create(device, frameCount=0) -> unique_ptr<UniformBuffer<T>>
+// frameCount=0 (default): auto-discovers from device->framesInFlight()
 
 UniformBuffer<T>:
     update(frameIndex, T& data)
@@ -863,7 +867,7 @@ Uniform/staging buffers use CpuToGpu with persistent mapping.
 auto renderer = SimpleRenderer::create(config);
 auto mesh = Mesh::loadOBJ(device, cmdPool, "model.obj");
 auto texture = Texture::fromFile(device, "tex.png", cmdPool);
-auto uniforms = UniformBuffer<MVP>::create(device, config.framesInFlight);
+auto uniforms = UniformBuffer<MVP>::create(device);  // Auto-discovers framesInFlight
 
 // Descriptors
 auto layout = DescriptorSetLayout::create(device)
@@ -1126,6 +1130,84 @@ Renderable:
     phase: RenderPhase (Opaque, Transparent, UI)
 ```
 
+### Overlay2D - 2D Screen-Space Rendering
+
+```cpp
+Overlay2D::create(device, renderPass)
+    .maxQuads(uint32_t)              // Default: 1024
+    .framesInFlight(uint32_t)        // Default: auto (device->framesInFlight())
+    .originTopLeft(bool)             // Default: true
+    .msaaSamples(VkSampleCountFlagBits)  // Default: VK_SAMPLE_COUNT_1_BIT
+    .vertexShader(path)              // Optional custom shader
+    .fragmentShader(path)            // Optional custom shader
+    .build() -> Overlay2DPtr
+
+Overlay2D:
+    // Frame lifecycle (call once per frame)
+    beginFrame(frameIndex, screenWidth, screenHeight)
+
+    // Drawing API (call between beginFrame and render)
+    drawQuad(x, y, width, height, Texture*, tint=white, uvRect={0,0,1,1})
+    drawQuad(x, y, width, height, color)  // Solid color quad
+    drawCrosshair(centerX, centerY, size, thickness, color)
+
+    // Rendering (call within render pass)
+    render(CommandBuffer&)
+
+    // Accessors
+    projection() -> mat4&
+    pipeline() -> GraphicsPipeline*
+    pipelineLayout() -> PipelineLayout*
+    descriptorSetLayout() -> DescriptorSetLayout*
+    device() -> LogicalDevice*
+
+struct OverlayUniform {
+    alignas(16) mat4 projection;
+};
+
+struct OverlayQuadData {
+    vec2 position;    // Screen position (pixels)
+    vec2 size;        // Width/height (pixels)
+    vec4 uvRect;      // (u0, v0, u1, v1)
+    vec4 color;       // RGBA tint
+    Texture* texture;
+};
+```
+
+**Key Features**:
+- Screen-space pixel coordinates
+- Alpha blending always enabled
+- No depth testing (always on top)
+- Batched by texture for efficient rendering
+- Uses internal 1x1 white texture for solid color quads
+
+**Usage Pattern**:
+```cpp
+// Setup (once) - framesInFlight auto-discovered from device
+auto overlay = Overlay2D::create(device, renderPass)
+    .maxQuads(256)
+    .msaaSamples(renderer->msaaSamples())
+    .build();
+
+// Per-frame
+overlay->beginFrame(currentFrame, extent.width, extent.height);
+
+// Queue draw calls
+overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});  // Solid color
+overlay->drawQuad(cx-16, cy-16, 32, 32, crosshairTex.get());   // Textured
+overlay->drawCrosshair(cx, cy, 30, 3, {1, 1, 1, 1});           // Helper
+
+// Render within pass (after 3D content)
+renderer->beginRenderPass(clearColor);
+worldRenderer.render(cmd);
+overlay->render(cmd);  // Overlay on top
+renderer->endRenderPass();
+```
+
+**Coordinate System**:
+- `originTopLeft(true)`: (0,0) at top-left, Y increases downward (default)
+- `originTopLeft(false)`: (0,0) at bottom-left, Y increases upward
+
 ## File Locations
 
 ```
@@ -1138,14 +1220,14 @@ include/finevk/
                 render_target.hpp, pipeline.hpp, descriptors.hpp, sync.hpp
   high/         simple_renderer.hpp, texture.hpp, mesh.hpp, raw_mesh.hpp,
                 material.hpp, uniform_buffer.hpp, vertex.hpp
-  engine/       asset_loader.hpp, camera.hpp, render_agent.hpp,
+  engine/       asset_loader.hpp, camera.hpp, render_agent.hpp, overlay2d.hpp,
                 frame_clock.hpp, game_loop.hpp, deferred_disposer.hpp
   window/       window.hpp
   platform/     glfw_surface.hpp
   finevk.hpp    (umbrella header)
 
 src/            (implementation files mirror include structure)
-examples/       hello_triangle/, viking_room/, asset_loader/
+examples/       hello_triangle/, viking_room/, asset_loader/, overlay_demo/
 tests/          test_phase1.cpp - test_phase4.cpp
 docs/           ARCHITECTURE.md, USER_GUIDE.md, USER_GUIDE_LLM.md,
                 DESIGN.md, ASSET_LOADER_SPEC.md, FINEVOX_RESPONSE.md

@@ -32,7 +32,7 @@ class Sampler;
  *
  * Usage:
  * @code
- * auto material = Material::create(device, framesInFlight)
+ * auto material = Material::create(device)  // framesInFlight auto-discovered
  *     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
  *     .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)
  *     .build();
@@ -54,11 +54,11 @@ public:
     /**
      * @brief Create a builder for a material
      * @param device Logical device
-     * @param framesInFlight Number of frames in flight (for per-frame resources)
+     * @param framesInFlight Number of frames in flight (0 = auto from device)
      */
-    static Builder create(LogicalDevice* device, uint32_t framesInFlight);
-    static Builder create(LogicalDevice& device, uint32_t framesInFlight);
-    static Builder create(const LogicalDevicePtr& device, uint32_t framesInFlight);
+    static Builder create(LogicalDevice* device, uint32_t framesInFlight = 0);
+    static Builder create(LogicalDevice& device, uint32_t framesInFlight = 0);
+    static Builder create(const LogicalDevicePtr& device, uint32_t framesInFlight = 0);
 
     /**
      * @brief Get the descriptor set layout

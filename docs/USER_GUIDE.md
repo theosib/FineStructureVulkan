@@ -421,8 +421,11 @@ struct MVP {
     alignas(16) glm::mat4 projection;
 };
 
-// Create with double-buffering
-auto uniforms = finevk::UniformBuffer<MVP>::create(device, 2);
+// Create with auto-discovered frame count (recommended)
+auto uniforms = finevk::UniformBuffer<MVP>::create(device);
+
+// Or specify explicitly if needed
+auto uniforms = finevk::UniformBuffer<MVP>::create(device, 3);  // Triple buffering
 
 // Update for current frame
 MVP mvp{};
@@ -804,6 +807,65 @@ if (chunkAABB.intersectsFrustum(camera.state().viewRelativeFrustumPlanes)) {
 }
 ```
 
+### 2D Overlay System
+
+The Overlay2D class renders 2D elements (UI, crosshairs, HUD) in screen space:
+
+```cpp
+#include <finevk/engine/overlay2d.hpp>
+
+// Create overlay (once during setup)
+auto overlay = finevk::Overlay2D::create(renderer->device(), renderer->renderPass())
+    .maxQuads(256)                           // Maximum quads per frame
+    .msaaSamples(renderer->msaaSamples())    // Match render pass
+    .originTopLeft(true)                     // Standard UI convention
+    .build();  // framesInFlight auto-discovered from device
+
+// In render loop
+overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
+
+// Draw solid color quad (x, y, width, height, color)
+overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+
+// Draw textured quad (x, y, width, height, texture, tint, uvRect)
+overlay->drawQuad(centerX - 16, centerY - 16, 32, 32,
+                  crosshairTexture.get(),
+                  {1.0f, 1.0f, 1.0f, 1.0f},        // White tint
+                  {0.0f, 0.0f, 1.0f, 1.0f});       // Full UV
+
+// Convenience: crosshair (centerX, centerY, size, thickness, color)
+overlay->drawCrosshair(centerX, centerY, 30.0f, 3.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+
+// Render within pass (after 3D content)
+renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
+worldRenderer.render(cmd);
+overlay->render(cmd);  // Overlay on top
+renderer->endRenderPass();
+```
+
+**Key Features:**
+- Screen-space pixel coordinates
+- Alpha blending (always on)
+- No depth testing (overlays always visible)
+- Batched by texture for efficient rendering
+- Custom shader support via builder
+
+**Builder Options:**
+| Method | Default | Description |
+|--------|---------|-------------|
+| `.maxQuads(n)` | 1024 | Maximum quads per frame |
+| `.framesInFlight(n)` | auto | Per-frame resource count (auto = uses `device->framesInFlight()`) |
+| `.originTopLeft(bool)` | true | Coordinate origin (true=top-left, false=bottom-left) |
+| `.msaaSamples(count)` | 1 | Must match render pass MSAA setting |
+| `.vertexShader(path)` | built-in | Custom vertex shader |
+| `.fragmentShader(path)` | built-in | Custom fragment shader |
+
+**Note:** The `framesInFlight` is automatically discovered from the device when Window::bindDevice() is called. You typically don't need to specify it explicitly.
+
+**Nuklear Integration:**
+
+Overlay2D works well with GUI toolkits like Nuklear. Use Overlay2D for game HUD elements (crosshairs, health bars, minimaps) while Nuklear handles complex UI widgets.
+
 ---
 
 ## Example: Complete Application
@@ -822,6 +884,19 @@ cd build/examples/viking_room
 ./viking_room
 ```
 
+See `examples/overlay_demo/` for a 2D overlay demonstration with:
+- Animated crosshair
+- Health/ammo bar UI elements
+- Mini-map placeholder
+- Blinking status indicators
+
+Build and run:
+```bash
+cmake --build build --target overlay_demo
+cd build/examples/overlay_demo
+./overlay_demo
+```
+
 ---
 
 ## Quick Reference
@@ -831,7 +906,7 @@ cd build/examples/viking_room
 | Create renderer | `SimpleRenderer::create(config)` |
 | Load texture | `Texture::fromFile(device, path, cmdPool)` |
 | Load model | `Mesh::loadOBJ(device, cmdPool, path)` |
-| Create uniform | `UniformBuffer<T>::create(device, frameCount)` |
+| Create uniform | `UniformBuffer<T>::create(device)` |
 | Bind descriptor | `DescriptorWriter(device).writeBuffer(...).update()` |
 | Draw mesh | `mesh->draw(commandBuffer)` |
 

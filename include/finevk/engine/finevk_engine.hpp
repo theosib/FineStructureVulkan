@@ -14,6 +14,7 @@
 #include "finevk/engine/game_loop.hpp"
 #include "finevk/engine/camera.hpp"
 #include "finevk/engine/render_agent.hpp"
+#include "finevk/engine/overlay2d.hpp"
 
 namespace finevk {
 
