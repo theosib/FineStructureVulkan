@@ -284,33 +284,43 @@ void Overlay2D::drawText(const std::string& text, float x, float y,
                          const FontAtlas& font,
                          const glm::vec4& color,
                          float scale) {
-    float cursorX = x;
+    if (text.empty()) return;
 
-    for (char c : text) {
+    float cursorX = x;
+    size_t len = text.length();
+
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
         const GlyphInfo* glyph = font.glyph(c);
         if (!glyph) {
-            continue;  // Skip unknown characters
+            continue;
+        }
+
+        // First char: adjust cursor by -leftSideBearing to handle glyphs that extend left
+        if (i == 0) {
+            cursorX -= glyph->leftSideBearing * scale;
         }
 
         // Calculate quad position
-        // bearing.x is the offset from cursor to left edge
-        // bearing.y is the offset from baseline to top edge
-        float quadX = cursorX + glyph->bearing.x * scale;
-        float quadY = y - glyph->bearing.y * scale;  // Subtract because Y increases downward
+        // offset.x = shift from cursor to left edge of bitmap
+        // offset.y = distance from baseline to top of glyph (positive = above baseline)
+        float quadX = cursorX + glyph->offset.x * scale;
+        float quadY = y - glyph->offset.y * scale;  // Subtract because Y increases downward
         float quadW = glyph->size.x * scale;
         float quadH = glyph->size.y * scale;
 
         // Only draw if glyph has size (spaces have no size)
         if (quadW > 0 && quadH > 0) {
-            // UV rect: (u0, v0, u1, v1)
             glm::vec4 uvRect(glyph->uvMin.x, glyph->uvMin.y,
                              glyph->uvMax.x, glyph->uvMax.y);
-
             drawQuad(quadX, quadY, quadW, quadH, font.texture(), color, uvRect);
         }
 
-        // Advance cursor
+        // Advance cursor with kerning
         cursorX += glyph->advance * scale;
+        if (i + 1 < len) {
+            cursorX += font.kerning(c, text[i + 1]) * scale;
+        }
     }
 }
 

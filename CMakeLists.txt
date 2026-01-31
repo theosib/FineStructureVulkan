@@ -253,6 +253,7 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/asset_loader.cpp
         src/engine/overlay2d.cpp
         src/engine/font_atlas.cpp
+        src/engine/text_renderer.cpp
     )
 
     # Engine library headers (for dependency tracking)
@@ -266,6 +267,7 @@ if(FINEVK_BUILD_ENGINE)
         include/finevk/engine/asset_loader.hpp
         include/finevk/engine/overlay2d.hpp
         include/finevk/engine/font_atlas.hpp
+        include/finevk/engine/text_renderer.hpp
     )
 
     # Helper function to configure finevk-engine target

@@ -22,9 +22,11 @@ class Sampler;
 struct GlyphInfo {
     glm::vec2 uvMin;        ///< Top-left UV coordinate in atlas
     glm::vec2 uvMax;        ///< Bottom-right UV coordinate in atlas
-    glm::vec2 size;         ///< Size in pixels
-    glm::vec2 bearing;      ///< Offset from baseline to top-left
+    glm::vec2 size;         ///< Size in pixels (bitmap dimensions)
+    glm::vec2 offset;       ///< Offset from cursor to top-left of glyph (x=shift, y=above baseline)
     float advance;          ///< Horizontal advance to next character
+    float leftSideBearing;  ///< Left side bearing (for first char adjustment)
+    int glyphIndex;         ///< Internal glyph index for kerning lookups
 };
 
 /**
@@ -104,8 +106,16 @@ public:
      */
     glm::vec2 measureSize(const std::string& text) const;
 
+    /**
+     * @brief Get kerning adjustment between two characters
+     * @param c1 First character
+     * @param c2 Second character (following c1)
+     * @return Kerning adjustment in pixels (add to advance)
+     */
+    float kerning(char c1, char c2) const;
+
     /// Destructor
-    ~FontAtlas() = default;
+    ~FontAtlas();
 
     // Non-copyable
     FontAtlas(const FontAtlas&) = delete;
@@ -124,6 +134,11 @@ private:
     float lineHeight_ = 0;
     float ascent_ = 0;
     float descent_ = 0;
+    float scale_ = 0;
+
+    // Font data kept for kerning queries
+    std::vector<unsigned char> fontBuffer_;
+    void* fontInfo_ = nullptr;  // stbtt_fontinfo* (opaque to avoid header exposure)
 };
 
 /**

@@ -78,7 +78,7 @@ int main() {
         FontAtlasPtr font;
         try {
             font = FontAtlas::load(device.get(), device->defaultCommandPool(),
-                                   "examples/overlay_demo/assets/Monaco.ttf")
+                                   "examples/overlay_demo/assets/PixeloidSans.ttf")
                 .pixelHeight(24.0f)
                 .build();
             std::cout << "Font loaded successfully.\n";
