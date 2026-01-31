@@ -7,6 +7,7 @@
  * - Solid color quads
  * - Textured quads with tinting
  * - Crosshair helper function
+ * - Text rendering with FontAtlas
  * - Integration with SimpleRenderer
  */
 
@@ -15,6 +16,8 @@
 
 #include <iostream>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 using namespace finevk;
 
@@ -64,12 +67,25 @@ int main() {
 
         // Create Overlay2D (framesInFlight automatically from device)
         auto overlay = Overlay2D::create(renderer->device(), renderer->renderPass())
-            .maxQuads(256)
+            .maxQuads(512)  // Increased for text rendering
             .msaaSamples(renderer->msaaSamples())
             .originTopLeft(true)  // Standard UI convention
             .build();
 
         std::cout << "Overlay2D created.\n";
+
+        // Load font atlas for text rendering
+        FontAtlasPtr font;
+        try {
+            font = FontAtlas::load(device.get(), device->defaultCommandPool(),
+                                   "examples/overlay_demo/assets/Monaco.ttf")
+                .pixelHeight(24.0f)
+                .build();
+            std::cout << "Font loaded successfully.\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Could not load font: " << e.what() << "\n";
+            std::cerr << "Text rendering will be disabled.\n";
+        }
 
         // Animation time
         float time = 0.0f;
@@ -138,6 +154,29 @@ int main() {
                 float dotX = mapX + mapSize / 2 + 30 * std::cos(time);
                 float dotY = mapY + mapSize / 2 + 30 * std::sin(time);
                 overlay->drawQuad(dotX - 4, dotY - 4, 8, 8, {1.0f, 1.0f, 0.3f, 1.0f});
+
+                // Text rendering (if font loaded successfully)
+                if (font) {
+                    // Draw title text
+                    overlay->drawTextCentered("Overlay2D Demo", width / 2.0f, 60.0f,
+                                              *font, {1.0f, 1.0f, 1.0f, 1.0f}, 1.5f);
+
+                    // Draw health label
+                    overlay->drawText("Health", 22, 15, *font, {0.8f, 0.8f, 0.8f, 1.0f}, 0.6f);
+
+                    // Draw ammo label
+                    overlay->drawText("Ammo", 22, height - 50, *font, {0.8f, 0.8f, 0.8f, 1.0f}, 0.6f);
+
+                    // Draw FPS counter (simulated)
+                    std::ostringstream fpsText;
+                    fpsText << "FPS: " << std::fixed << std::setprecision(1) << 60.0f;
+                    overlay->drawText(fpsText.str(), width - 100, 60, *font, {0.7f, 1.0f, 0.7f, 1.0f});
+
+                    // Draw status text with animation
+                    float alpha = 0.5f + 0.5f * std::sin(time * 2.0f);
+                    overlay->drawTextCentered("Press ESC to exit", width / 2.0f, height - 30.0f,
+                                              *font, {0.7f, 0.7f, 0.7f, alpha});
+                }
 
                 // Render the frame
                 renderer->beginRenderPass({0.05f, 0.05f, 0.1f, 1.0f});

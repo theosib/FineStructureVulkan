@@ -22,6 +22,7 @@ class DescriptorPool;
 class GraphicsPipeline;
 class PipelineLayout;
 class Buffer;
+class FontAtlas;
 
 /**
  * @brief Uniform data for 2D overlay rendering
@@ -150,6 +151,50 @@ public:
      */
     void drawQuad(float x, float y, float width, float height,
                   const glm::vec4& color);
+
+    // =========================================================================
+    // Text Rendering
+    // =========================================================================
+
+    /**
+     * @brief Draw text at the specified screen position
+     *
+     * Renders text using a pre-loaded FontAtlas. The position specifies
+     * where the text baseline begins.
+     *
+     * @param text The text string to render
+     * @param x X position in pixels (left edge of first character)
+     * @param y Y position in pixels (baseline position)
+     * @param font Font atlas to use for rendering
+     * @param color Text color (RGBA)
+     * @param scale Scale factor (1.0 = normal size)
+     */
+    void drawText(const std::string& text, float x, float y,
+                  const FontAtlas& font,
+                  const glm::vec4& color = {1.0f, 1.0f, 1.0f, 1.0f},
+                  float scale = 1.0f);
+
+    void drawText(const std::string& text, float x, float y,
+                  const FontAtlas* font,
+                  const glm::vec4& color = {1.0f, 1.0f, 1.0f, 1.0f},
+                  float scale = 1.0f) {
+        if (font) drawText(text, x, y, *font, color, scale);
+    }
+
+    /**
+     * @brief Draw centered text at the specified screen position
+     *
+     * @param text The text string to render
+     * @param centerX Center X position in pixels
+     * @param y Y position in pixels (baseline position)
+     * @param font Font atlas to use for rendering
+     * @param color Text color (RGBA)
+     * @param scale Scale factor (1.0 = normal size)
+     */
+    void drawTextCentered(const std::string& text, float centerX, float y,
+                          const FontAtlas& font,
+                          const glm::vec4& color = {1.0f, 1.0f, 1.0f, 1.0f},
+                          float scale = 1.0f);
 
     // =========================================================================
     // Convenience Helpers

@@ -1,4 +1,5 @@
 #include "finevk/engine/overlay2d.hpp"
+#include "finevk/engine/font_atlas.hpp"
 
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/buffer.hpp"
@@ -277,6 +278,48 @@ void Overlay2D::drawCrosshair(float centerX, float centerY,
     // Vertical bar
     drawQuad(centerX - halfThick, centerY - halfSize,
              thickness, size, color);
+}
+
+void Overlay2D::drawText(const std::string& text, float x, float y,
+                         const FontAtlas& font,
+                         const glm::vec4& color,
+                         float scale) {
+    float cursorX = x;
+
+    for (char c : text) {
+        const GlyphInfo* glyph = font.glyph(c);
+        if (!glyph) {
+            continue;  // Skip unknown characters
+        }
+
+        // Calculate quad position
+        // bearing.x is the offset from cursor to left edge
+        // bearing.y is the offset from baseline to top edge
+        float quadX = cursorX + glyph->bearing.x * scale;
+        float quadY = y - glyph->bearing.y * scale;  // Subtract because Y increases downward
+        float quadW = glyph->size.x * scale;
+        float quadH = glyph->size.y * scale;
+
+        // Only draw if glyph has size (spaces have no size)
+        if (quadW > 0 && quadH > 0) {
+            // UV rect: (u0, v0, u1, v1)
+            glm::vec4 uvRect(glyph->uvMin.x, glyph->uvMin.y,
+                             glyph->uvMax.x, glyph->uvMax.y);
+
+            drawQuad(quadX, quadY, quadW, quadH, font.texture(), color, uvRect);
+        }
+
+        // Advance cursor
+        cursorX += glyph->advance * scale;
+    }
+}
+
+void Overlay2D::drawTextCentered(const std::string& text, float centerX, float y,
+                                 const FontAtlas& font,
+                                 const glm::vec4& color,
+                                 float scale) {
+    float width = font.measureWidth(text) * scale;
+    drawText(text, centerX - width * 0.5f, y, font, color, scale);
 }
 
 void Overlay2D::render(CommandBuffer& cmd) {

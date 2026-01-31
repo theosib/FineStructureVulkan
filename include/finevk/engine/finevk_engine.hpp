@@ -15,6 +15,7 @@
 #include "finevk/engine/camera.hpp"
 #include "finevk/engine/render_agent.hpp"
 #include "finevk/engine/overlay2d.hpp"
+#include "finevk/engine/font_atlas.hpp"
 
 namespace finevk {
 
