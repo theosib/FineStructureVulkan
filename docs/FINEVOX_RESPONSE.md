@@ -236,26 +236,45 @@ For custom per-frame resources, a simple `std::vector<T>` with a frame index is 
 
 ### Text Rendering System - NEW
 
-Added FontAtlas and text rendering support to Overlay2D:
+Added FontAtlas with both 2D and 3D text rendering:
 
+**2D Text (Overlay2D)** - for HUD, UI elements:
 ```cpp
 #include <finevk/engine/font_atlas.hpp>
 
-// Load TrueType font
 auto font = finevk::FontAtlas::load(device, commandPool, "fonts/PixeloidSans.ttf")
     .pixelHeight(24.0f)
     .build();
 
-// Draw text (via Overlay2D)
 overlay->drawText("Score: 100", x, y, *font, {1.0f, 1.0f, 1.0f, 1.0f});
 overlay->drawTextCentered("Game Over", centerX, y, *font, color, scale);
+```
+
+**3D Text (TextRenderer)** - for signs, billboards, player names:
+```cpp
+#include <finevk/engine/text_renderer.hpp>
+
+auto textRenderer = finevk::TextRenderer::create(device, renderPass)
+    .font(font.get())
+    .build();
+
+textRenderer->beginFrame(frameIndex, viewProjection);
+
+// Fixed 3D sign
+textRenderer->drawText3D("Welcome", worldPos, right, down, scale, color);
+
+// Billboard (faces camera)
+textRenderer->drawBillboard("Player 1", worldPos, scale, cameraPos, cameraUp, color);
+
+textRenderer->render(cmd);
 ```
 
 **Features:**
 - TrueType font loading via stb_truetype
 - Glyph metrics and kerning support
 - `measureWidth()` and `measureSize()` for layout
-- Seamlessly integrates with Overlay2D batching
+- 2D text integrates with Overlay2D batching
+- 3D text supports depth testing and camera-facing billboards
 
 ### Overlay2D Descriptor Set Fix - INTERNAL
 

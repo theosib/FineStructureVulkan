@@ -895,6 +895,65 @@ Overlay2D works well with GUI toolkits like Nuklear. Use Overlay2D for game HUD 
 
 ---
 
+## 3D Text Rendering (TextRenderer)
+
+For text in 3D world space (signs, billboards, player names), use `TextRenderer`:
+
+```cpp
+#include <finevk/engine/text_renderer.hpp>
+
+// Setup (once)
+auto textRenderer = finevk::TextRenderer::create(device.get(), renderPass.get())
+    .font(font.get())           // FontAtlas to use
+    .maxCharacters(1024)        // Max characters per frame
+    .depthTest(true)            // Enable depth testing (default)
+    .build();
+
+// In render loop
+textRenderer->beginFrame(frameIndex, camera.state().viewProjection);
+
+// Draw 3D positioned text (for signs, labels)
+glm::vec3 signPos{10.0f, 5.0f, 0.0f};   // Top-left corner in world space
+glm::vec3 right{1.0f, 0.0f, 0.0f};       // Text horizontal direction
+glm::vec3 down{0.0f, -1.0f, 0.0f};       // Text vertical direction
+float scale = 0.05f;                      // World units per pixel
+textRenderer->drawText3D("Welcome!", signPos, right, down, scale, {1.0f, 1.0f, 1.0f, 1.0f});
+
+// Draw billboard text (always faces camera)
+glm::vec3 playerPos{5.0f, 2.0f, 3.0f};
+textRenderer->drawBillboard("Player 1", playerPos, 0.02f,
+                            camera.positionD(),     // Camera position
+                            camera.state().up,      // Camera up vector
+                            {0.0f, 1.0f, 0.0f, 1.0f}); // Green color
+
+// Render within pass (with other 3D content)
+textRenderer->render(cmd);
+```
+
+**Drawing Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `drawText3D(text, corner, right, down, scale, color)` | Fixed-orientation text in world space |
+| `drawBillboard(text, pos, scale, cameraPos, cameraUp, color, minScale)` | Camera-facing text that scales with distance |
+
+**Builder Options:**
+
+| Method | Default | Description |
+|--------|---------|-------------|
+| `.font(atlas)` | required | FontAtlas to use for rendering |
+| `.maxCharacters(n)` | 1024 | Maximum characters per frame |
+| `.framesInFlight(n)` | auto | Per-frame resource count |
+| `.msaaSamples(count)` | 1 | Must match render pass MSAA setting |
+| `.depthTest(bool)` | true | Enable depth testing against scene geometry |
+
+**Use Cases:**
+- **Signs/Labels:** Use `drawText3D()` with explicit orientation vectors
+- **Player Names:** Use `drawBillboard()` so names always face the camera
+- **Distance Markers:** Billboard text with `minScale` prevents text from becoming unreadable at distance
+
+---
+
 ## Example: Complete Application
 
 See `examples/viking_room/` for a complete textured model viewer with:
