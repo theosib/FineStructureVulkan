@@ -1151,6 +1151,10 @@ Overlay2D:
     drawQuad(x, y, width, height, color)  // Solid color quad
     drawCrosshair(centerX, centerY, size, thickness, color)
 
+    // Text rendering (requires FontAtlas)
+    drawText(text, x, y, FontAtlas&, color=white, scale=1.0f)
+    drawTextCentered(text, centerX, y, FontAtlas&, color=white, scale=1.0f)
+
     // Rendering (call within render pass)
     render(CommandBuffer&)
 
@@ -1208,6 +1212,124 @@ renderer->endRenderPass();
 - `originTopLeft(true)`: (0,0) at top-left, Y increases downward (default)
 - `originTopLeft(false)`: (0,0) at bottom-left, Y increases upward
 
+### FontAtlas - TrueType Font Loading
+
+```cpp
+FontAtlas::load(device, commandPool, path)
+    .pixelHeight(float)              // Font size in pixels (default: 32.0f)
+    .oversample(uint32_t)            // Oversampling for quality (default: 2)
+    .build() -> FontAtlasPtr
+
+FontAtlas:
+    // Glyph access
+    getGlyph(char) -> Glyph&
+    hasGlyph(char) -> bool
+
+    // Measurement
+    measureWidth(text) -> float      // Width in pixels
+    measureSize(text) -> pair<float,float>  // (width, height)
+    lineHeight() -> float
+    ascent() -> float
+    descent() -> float
+
+    // Kerning
+    getKerning(char1, char2) -> float
+
+    // Texture access (for custom rendering)
+    texture() -> Texture*
+    atlasWidth() -> uint32_t
+    atlasHeight() -> uint32_t
+
+struct Glyph {
+    float x0, y0, x1, y1;    // Texture coordinates (normalized)
+    float xOffset, yOffset;  // Glyph offset from baseline
+    float width, height;     // Glyph size in pixels
+    float advance;           // Horizontal advance to next character
+};
+```
+
+**Usage Pattern**:
+```cpp
+// Load font (once)
+auto font = FontAtlas::load(device.get(), commandPool, "fonts/MyFont.ttf")
+    .pixelHeight(24.0f)
+    .build();
+
+// Use with Overlay2D for 2D text
+overlay->drawText("Score: 100", 20.0f, 50.0f, *font, {1,1,1,1});
+
+// Measure for layout
+float width = font->measureWidth("Hello World");
+auto [w, h] = font->measureSize("Hello World");
+```
+
+### TextRenderer - 3D World-Space Text
+
+```cpp
+TextRenderer::create(device, renderPass)
+    .font(FontAtlas*)                // Required
+    .maxCharacters(uint32_t)         // Default: 1024
+    .framesInFlight(uint32_t)        // Default: auto
+    .msaaSamples(VkSampleCountFlagBits)  // Default: VK_SAMPLE_COUNT_1_BIT
+    .depthTest(bool)                 // Default: true
+    .build() -> TextRendererPtr
+
+TextRenderer:
+    // Frame lifecycle
+    beginFrame(frameIndex, viewProjection)
+
+    // 3D positioned text (signs, labels)
+    drawText3D(text, corner, right, down, scale, color=white)
+        // corner: World position of top-left
+        // right: Normalized direction for text horizontal axis
+        // down: Normalized direction for text vertical axis
+        // scale: World units per pixel
+
+    // Billboard text (faces camera, scales with distance)
+    drawBillboard(text, worldPos, scale, cameraPos, cameraUp, color=white, minScale=0.001f)
+        // worldPos: Center position in world space
+        // scale: World units per pixel at reference distance
+        // minScale: Prevents text from becoming too small
+
+    // Rendering
+    render(CommandBuffer&)
+
+    // Accessors
+    font() -> FontAtlas*
+    device() -> LogicalDevice*
+```
+
+**Usage Pattern**:
+```cpp
+// Setup (once)
+auto textRenderer = TextRenderer::create(device.get(), renderPass.get())
+    .font(font.get())
+    .depthTest(true)
+    .build();
+
+// Per-frame
+textRenderer->beginFrame(frameIndex, camera.state().viewProjection);
+
+// Fixed 3D sign
+vec3 signPos{10, 5, 0};
+vec3 right{1, 0, 0};
+vec3 down{0, -1, 0};
+textRenderer->drawText3D("Welcome", signPos, right, down, 0.05f, {1,1,1,1});
+
+// Billboard (player name)
+textRenderer->drawBillboard("Player 1", playerPos, 0.02f,
+                            vec3(camera.positionD()),
+                            camera.state().up,
+                            {0,1,0,1});
+
+// Render with scene
+textRenderer->render(cmd);
+```
+
+**Use Cases**:
+- `drawText3D()`: Signs, labels, fixed-orientation text in world
+- `drawBillboard()`: Player names, markers, always-facing text
+
 ## File Locations
 
 ```
@@ -1221,7 +1343,8 @@ include/finevk/
   high/         simple_renderer.hpp, texture.hpp, mesh.hpp, raw_mesh.hpp,
                 material.hpp, uniform_buffer.hpp, vertex.hpp
   engine/       asset_loader.hpp, camera.hpp, render_agent.hpp, overlay2d.hpp,
-                frame_clock.hpp, game_loop.hpp, deferred_disposer.hpp
+                font_atlas.hpp, text_renderer.hpp, frame_clock.hpp,
+                game_loop.hpp, deferred_disposer.hpp
   window/       window.hpp
   platform/     glfw_surface.hpp
   finevk.hpp    (umbrella header)
