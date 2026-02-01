@@ -254,6 +254,7 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/overlay2d.cpp
         src/engine/font_atlas.cpp
         src/engine/text_renderer.cpp
+        src/engine/input_manager.cpp
     )
 
     # Engine library headers (for dependency tracking)
@@ -268,6 +269,7 @@ if(FINEVK_BUILD_ENGINE)
         include/finevk/engine/overlay2d.hpp
         include/finevk/engine/font_atlas.hpp
         include/finevk/engine/text_renderer.hpp
+        include/finevk/engine/input_manager.hpp
     )
 
     # Helper function to configure finevk-engine target

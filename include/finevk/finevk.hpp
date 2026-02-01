@@ -48,6 +48,7 @@
 #include "finevk/engine/frame_clock.hpp"
 #include "finevk/engine/game_loop.hpp"
 #include "finevk/engine/deferred_disposer.hpp"
+#include "finevk/engine/input_manager.hpp"
 
 // Forward declarations and common types
 #include "finevk/core/types.hpp"

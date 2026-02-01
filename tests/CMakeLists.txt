@@ -35,5 +35,12 @@ add_executable(test_phase5
 
 target_link_libraries(test_phase5 PRIVATE finevk-core finevk-engine)
 
+# InputManager test
+add_executable(test_input_manager
+    test_input_manager.cpp
+)
+
+target_link_libraries(test_input_manager PRIVATE finevk-core finevk-engine)
+
 # Copy any required resources
 # (none for Phase 1/2/3/4/5)

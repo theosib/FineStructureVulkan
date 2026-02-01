@@ -954,6 +954,95 @@ textRenderer->render(cmd);
 
 ---
 
+## Input Manager
+
+The `InputManager` provides comprehensive input handling with "fat events" that include complete input state at the time of each event.
+
+```cpp
+#include <finevk/engine/input_manager.hpp>
+
+// Create InputManager bound to a window
+auto input = finevk::InputManager::create(window.get());
+
+// Option 1: Event callback (receives events with full state)
+input->setEventCallback([](const finevk::InputEvent& e) {
+    if (e.type == finevk::InputEventType::KeyPress) {
+        if (e.key == finevk::Key::W) {
+            // W pressed - can also check e.state.isShiftPressed(), etc.
+        }
+    }
+});
+
+// Option 2: Poll events manually
+finevk::InputEvent event;
+while (input->pollEvent(event)) {
+    // Handle event
+}
+
+// Option 3: Direct state queries
+if (input->isKeyDown(finevk::Key::W)) {
+    // W is currently held
+}
+if (input->wasKeyPressed(finevk::Key::Space)) {
+    // Space was pressed THIS frame (not held from before)
+}
+
+// In game loop
+input->update();  // Call once per frame - clears per-frame state, dispatches events
+```
+
+**InputState** - Complete snapshot of all input:
+```cpp
+const finevk::InputState& state = input->currentState();
+state.isKeyPressed(key);           // Is key currently held?
+state.isMouseButtonPressed(btn);   // Is mouse button held?
+state.mousePosition;               // Current mouse position
+state.mouseDelta;                  // Mouse movement this frame
+state.scrollDelta;                 // Scroll wheel this frame
+state.isShiftPressed();            // Modifier queries
+state.getPressedKeys();            // All currently pressed keys
+```
+
+**InputEvent** - Fat event with complete state:
+```cpp
+struct InputEvent {
+    InputEventType type;      // KeyPress, KeyRelease, MouseMove, etc.
+    Key key;                  // For key events
+    MouseButton mouseButton;  // For mouse button events
+    uint32_t character;       // For CharInput (UTF-32)
+    InputState state;         // COMPLETE state at time of event
+    double time;              // Timestamp (seconds since start)
+};
+```
+
+**Action Mapping** - Rebindable controls:
+```cpp
+// Map named actions to keys
+input->mapAction("move_forward", finevk::Key::W);
+input->mapAction("jump", finevk::Key::Space);
+input->mapActionToMouse("shoot", finevk::MouseButton::Left);
+
+// Query by action name
+if (input->isActionActive("move_forward")) { /* W held */ }
+if (input->wasActionTriggered("jump")) { /* Space pressed this frame */ }
+```
+
+**Mouse Capture:**
+```cpp
+input->setMouseCaptured(true);   // Hide cursor, lock to window
+input->isMouseCaptured();        // Check capture state
+```
+
+**Event Injection** (for testing/replay):
+```cpp
+finevk::InputEvent syntheticEvent;
+syntheticEvent.type = finevk::InputEventType::KeyPress;
+syntheticEvent.key = finevk::Key::W;
+input->injectEvent(syntheticEvent);
+```
+
+---
+
 ## Example: Complete Application
 
 See `examples/viking_room/` for a complete textured model viewer with:

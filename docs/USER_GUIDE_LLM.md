@@ -1330,6 +1330,115 @@ textRenderer->render(cmd);
 - `drawText3D()`: Signs, labels, fixed-orientation text in world
 - `drawBillboard()`: Player names, markers, always-facing text
 
+### InputManager - Comprehensive Input Handling
+
+```cpp
+InputManager::create(Window*) -> unique_ptr<InputManager>
+
+// Frame update (call once per frame)
+update()  // Clears per-frame state, dispatches queued events
+
+// Event handling
+setEventCallback(function<void(const InputEvent&)>)
+pollEvent(InputEvent&) -> bool   // Returns false when queue empty
+clearEvents()
+
+// Direct state queries
+currentState() -> const InputState&
+isKeyDown(Key) -> bool           // Key currently held
+wasKeyPressed(Key) -> bool       // Key pressed THIS frame
+wasKeyReleased(Key) -> bool      // Key released THIS frame
+isMouseButtonDown(MouseButton) -> bool
+wasMouseButtonPressed(MouseButton) -> bool
+wasMouseButtonReleased(MouseButton) -> bool
+mousePosition() -> vec2
+mouseDelta() -> vec2
+scrollDelta() -> vec2
+
+// Mouse capture
+setMouseCaptured(bool)
+isMouseCaptured() -> bool
+
+// Action mapping (rebindable controls)
+mapAction(string name, Key)
+mapActionToMouse(string name, MouseButton)
+isActionActive(string) -> bool   // Key/button held
+wasActionTriggered(string) -> bool  // Key/button pressed this frame
+unmapAction(string)
+clearActionMappings()
+
+// Testing/replay
+injectEvent(const InputEvent&)
+```
+
+**InputState** - Complete input snapshot:
+```cpp
+struct InputState {
+    unordered_set<Key> pressedKeys;
+    unordered_set<MouseButton> pressedButtons;
+    vec2 mousePosition;
+    vec2 mouseDelta;
+    vec2 scrollDelta;
+    Modifier modifiers;
+
+    isKeyPressed(Key) -> bool
+    isMouseButtonPressed(MouseButton) -> bool
+    getPressedKeys() -> vector<Key>
+    getPressedButtons() -> vector<MouseButton>
+    isShiftPressed() -> bool
+    isControlPressed() -> bool
+    isAltPressed() -> bool
+    isSuperPressed() -> bool
+};
+```
+
+**InputEvent** - Fat event with complete state:
+```cpp
+enum class InputEventType {
+    KeyPress, KeyRelease, KeyRepeat,
+    MouseButtonPress, MouseButtonRelease,
+    MouseMove, MouseScroll,
+    CharInput  // UTF-32 codepoint
+};
+
+struct InputEvent {
+    InputEventType type;
+    Key key;                    // For key events
+    MouseButton mouseButton;    // For mouse button events
+    uint32_t character;         // For CharInput
+    InputState state;           // COMPLETE state at time of event
+    double time;                // Seconds since InputManager creation
+};
+```
+
+**Usage Pattern**:
+```cpp
+auto input = InputManager::create(window.get());
+
+// Callback mode
+input->setEventCallback([](const InputEvent& e) {
+    if (e.type == InputEventType::KeyPress && e.key == Key::W) {
+        // W pressed, e.state has full input snapshot
+    }
+});
+
+// Or polling mode
+InputEvent event;
+while (input->pollEvent(event)) { /* handle */ }
+
+// Or direct queries
+if (input->wasKeyPressed(Key::Space)) { /* jump */ }
+
+// Action mapping
+input->mapAction("jump", Key::Space);
+if (input->wasActionTriggered("jump")) { /* jump */ }
+
+// In game loop
+input->update();  // Must call each frame
+```
+
+**Key Feature**: Every InputEvent includes complete InputState - query any key/button during any event type.
+
 ## File Locations
 
 ```
@@ -1343,8 +1452,8 @@ include/finevk/
   high/         simple_renderer.hpp, texture.hpp, mesh.hpp, raw_mesh.hpp,
                 material.hpp, uniform_buffer.hpp, vertex.hpp
   engine/       asset_loader.hpp, camera.hpp, render_agent.hpp, overlay2d.hpp,
-                font_atlas.hpp, text_renderer.hpp, frame_clock.hpp,
-                game_loop.hpp, deferred_disposer.hpp
+                font_atlas.hpp, text_renderer.hpp, input_manager.hpp,
+                frame_clock.hpp, game_loop.hpp, deferred_disposer.hpp
   window/       window.hpp
   platform/     glfw_surface.hpp
   finevk.hpp    (umbrella header)
