@@ -4,18 +4,35 @@ A modern C++17 Vulkan wrapper that makes GPU programming accessible without hidi
 
 ## Quick Start
 
-### Hello Triangle in 30 Lines
+### Hello Triangle
 
 ```cpp
 #include <finevk/finevk.hpp>
 
 int main() {
-    // Create a renderer with sensible defaults
-    finevk::RendererConfig config;
-    config.width = 800;
-    config.height = 600;
+    // 1. Create Vulkan instance
+    auto instance = finevk::Instance::create()
+        .applicationName("Hello Triangle")
+        .enableValidation()
+        .build();
 
-    auto renderer = finevk::SimpleRenderer::create(config);
+    // 2. Create window
+    auto window = finevk::Window::create(instance.get())
+        .title("Hello Triangle")
+        .size(800, 600)
+        .build();
+
+    // 3. Select GPU and create device
+    auto gpu = instance->selectPhysicalDevice(window.get());
+    auto device = gpu.createLogicalDevice()
+        .surface(window->surface())
+        .build();
+
+    // 4. Bind device to window (creates swap chain)
+    window->bindDevice(device);
+
+    // 5. Create renderer
+    auto renderer = finevk::SimpleRenderer::create(window.get());
 
     // Create a simple triangle
     auto mesh = finevk::Mesh::Builder(renderer->device(), renderer->commandPool())
@@ -26,29 +43,33 @@ int main() {
         .build();
 
     // Main loop
-    while (!renderer->shouldClose()) {
-        renderer->pollEvents();
+    while (window->isOpen()) {
+        window->pollEvents();
 
         if (auto frame = renderer->beginFrame()) {
-            auto cmd = renderer->beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});
-            mesh->draw(cmd);
+            renderer->beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});
+            mesh->draw(frame);
             renderer->endRenderPass();
             renderer->endFrame();
         }
     }
 
+    renderer->waitIdle();
     return 0;
 }
 ```
 
 ### What Just Happened?
 
-1. **SimpleRenderer** created a window, Vulkan instance, device, swap chain, render pass, and synchronization objects
-2. **Mesh::Builder** uploaded vertex data to GPU memory with proper staging
-3. **beginFrame/endFrame** handled swap chain image acquisition and presentation
-4. **beginRenderPass/endRenderPass** set up command buffers and framebuffers
+1. **Instance** created the Vulkan instance with validation layers
+2. **Window** created a GLFW window with Vulkan surface
+3. **LogicalDevice** selected a GPU and created the Vulkan device
+4. **SimpleRenderer** created the render pass, framebuffers, and synchronization
+5. **Mesh::Builder** uploaded vertex data to GPU memory with proper staging
+6. **beginFrame/endFrame** handled swap chain image acquisition and presentation
+7. **beginRenderPass/endRenderPass** set up command buffers and framebuffers
 
-You didn't write a single line of Vulkan boilerplate, yet you have full access to everything underneath.
+You have full access to everything underneath while the boilerplate is handled for you.
 
 ---
 
@@ -94,27 +115,40 @@ Builders validate parameters and throw descriptive exceptions on failure.
 
 ### Using SimpleRenderer (Recommended)
 
-For most applications, `SimpleRenderer` handles everything:
+For most applications, `SimpleRenderer` handles rendering setup:
 
 ```cpp
+// 1. Create instance, window, device (see Quick Start)
+auto instance = finevk::Instance::create()
+    .applicationName("My App")
+    .enableValidation()
+    .build();
+
+auto window = finevk::Window::create(instance.get())
+    .title("My App")
+    .size(1280, 720)
+    .vsync(true)
+    .build();
+
+auto gpu = instance->selectPhysicalDevice(window.get());
+auto device = gpu.createLogicalDevice()
+    .surface(window->surface())
+    .enableAnisotropy()
+    .build();
+
+window->bindDevice(device);
+
+// 2. Create renderer with configuration
 finevk::RendererConfig config;
-config.width = 1280;
-config.height = 720;
-config.vsync = true;  // Enable vertical sync
-config.enableValidation = true;  // Vulkan validation layers
 config.enableDepthBuffer = true;  // Depth testing
 config.msaa = finevk::MSAALevel::Medium;  // 4x anti-aliasing
 
-auto renderer = finevk::SimpleRenderer::create(config);
+auto renderer = finevk::SimpleRenderer::create(window.get(), config);
 ```
 
 **RendererConfig Options:**
 | Option | Default | Description |
 |--------|---------|-------------|
-| `width`, `height` | 800x600 | Window dimensions |
-| `framesInFlight` | 2 | Double/triple buffering |
-| `vsync` | true | Vertical sync |
-| `enableValidation` | true | Vulkan validation layers |
 | `enableDepthBuffer` | true | Depth buffer creation |
 | `msaa` | Off | Anti-aliasing level |
 
@@ -358,7 +392,9 @@ finevk::MeshRef playerMesh = loader->loadMesh("player.obj");
 material->setTexture(0, floorTex);  // Shows pending → real → error
 
 // In game loop
-while (!renderer->shouldClose()) {
+while (window->isOpen()) {
+    window->pollEvents();
+
     // Process GPU uploads (time-budgeted: 2ms per frame)
     loader->update();
 
@@ -522,22 +558,21 @@ auto pipeline = finevk::GraphicsPipeline::create(device, renderPass, pipelineLay
 ### Frame Structure
 
 ```cpp
-while (!renderer->shouldClose()) {
-    renderer->pollEvents();
+while (window->isOpen()) {
+    window->pollEvents();
 
-    // Begin frame - may return nullopt during resize
+    // Begin frame - returns false during resize
     if (auto frame = renderer->beginFrame()) {
-        uint32_t frameIndex = *frame;
+        // Update per-frame data (frame index obtained from renderer)
+        uniforms->update(renderer->currentFrame(), mvpData);
 
-        // Update per-frame data
-        uniforms->update(frameIndex, mvpData);
+        // Begin render pass with clear color
+        renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
 
-        // Record commands
-        auto cmd = renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
-
-        cmd.bindPipeline(pipeline);
-        descriptors.bind(cmd);
-        mesh->draw(cmd);
+        // frame implicitly converts to CommandBuffer&
+        frame.commandBuffer->bindPipeline(pipeline);
+        descriptors.bind(*frame.commandBuffer);
+        mesh->draw(frame);  // frame converts to CommandBuffer&
 
         renderer->endRenderPass();
         renderer->endFrame();
@@ -669,7 +704,10 @@ FineStructure throws exceptions with descriptive messages:
 
 ```cpp
 try {
-    auto renderer = finevk::SimpleRenderer::create(config);
+    auto instance = finevk::Instance::create().applicationName("App").build();
+    auto window = finevk::Window::create(instance.get()).size(800, 600).build();
+    // ... setup device and bind to window ...
+    auto renderer = finevk::SimpleRenderer::create(window.get());
 } catch (const std::runtime_error& e) {
     std::cerr << "Vulkan error: " << e.what() << std::endl;
 }
@@ -687,7 +725,7 @@ try {
 
 ### Validation Layers
 
-Enable with `config.enableValidation = true` or `Instance::Builder().enableValidation()`.
+Enable with `Instance::Builder().enableValidation()`.
 
 Validation messages appear in console output via the library's logging system.
 
@@ -1082,12 +1120,14 @@ cd build/examples/overlay_demo
 
 | Task | Code |
 |------|------|
-| Create renderer | `SimpleRenderer::create(config)` |
+| Create instance | `Instance::create().applicationName("App").build()` |
+| Create window | `Window::create(instance).size(w, h).build()` |
+| Create renderer | `SimpleRenderer::create(window)` |
 | Load texture | `Texture::fromFile(device, path, cmdPool)` |
 | Load model | `Mesh::loadOBJ(device, cmdPool, path)` |
 | Create uniform | `UniformBuffer<T>::create(device)` |
 | Bind descriptor | `DescriptorWriter(device).writeBuffer(...).update()` |
-| Draw mesh | `mesh->draw(commandBuffer)` |
+| Draw mesh | `mesh->draw(frame)` |
 
 ---
 

@@ -610,12 +610,8 @@ FrameSyncObjects(device, frameCount)
 ### SimpleRenderer
 
 ```cpp
+// Requires Window with bound device (see setup below)
 struct RendererConfig {
-    uint32_t width = 800;
-    uint32_t height = 600;
-    uint32_t framesInFlight = 2;
-    bool vsync = true;
-    bool enableValidation = true;
     bool enableDepthBuffer = true;
     MSAALevel msaa = MSAALevel::Off;
 };
@@ -628,18 +624,22 @@ enum class MSAALevel {
     Ultra = 16    // 16x
 };
 
-SimpleRenderer::create(config) -> SimpleRendererPtr
+// Setup: Instance -> Window -> PhysicalDevice -> LogicalDevice -> bindDevice -> SimpleRenderer
+SimpleRenderer::create(Window*, config?) -> SimpleRendererPtr
 
 SimpleRenderer:
-    shouldClose() -> bool
-    pollEvents()
-    beginFrame() -> optional<uint32_t>  // Frame index or nullopt if resize
+    beginFrame() -> FrameBeginResult  // Check .success or use in if-statement
     endFrame()
-    beginRenderPass(clearColor) -> VkCommandBuffer
+    beginRenderPass(clearColor)  // No return - command buffer from beginFrame
     endRenderPass()
     waitIdle()
 
+    // Frame info
+    currentFrame() -> uint32_t  // Current frame index (0 to framesInFlight-1)
+    framesInFlight() -> uint32_t
+
     // Access internals
+    window() -> Window*
     device() -> LogicalDevice*
     swapChain() -> SwapChain*
     renderPass() -> RenderPass*
@@ -649,6 +649,16 @@ SimpleRenderer:
     colorFormat() -> VkFormat
     depthFormat() -> VkFormat
     msaaSamples() -> VkSampleCountFlagBits
+
+struct FrameBeginResult {
+    bool success;
+    bool resized;
+    uint32_t imageIndex;
+    CommandBuffer* commandBuffer;
+
+    operator bool()           // Check success in if-statement
+    operator CommandBuffer&() // Implicit conversion for draw calls
+};
 ```
 
 ### Texture
@@ -863,10 +873,17 @@ Uniform/staging buffers use CpuToGpu with persistent mapping.
 ## Typical Usage Pattern
 
 ```cpp
-// Setup
-auto renderer = SimpleRenderer::create(config);
-auto mesh = Mesh::loadOBJ(device, cmdPool, "model.obj");
-auto texture = Texture::fromFile(device, "tex.png", cmdPool);
+// Setup: Instance -> Window -> Device -> Bind -> Renderer
+auto instance = Instance::create().applicationName("App").enableValidation().build();
+auto window = Window::create(instance.get()).title("App").size(1280, 720).build();
+auto gpu = instance->selectPhysicalDevice(window.get());
+auto device = gpu.createLogicalDevice().surface(window->surface()).build();
+window->bindDevice(device);
+auto renderer = SimpleRenderer::create(window.get());
+
+// Assets
+auto mesh = Mesh::loadOBJ(device, renderer->commandPool(), "model.obj");
+auto texture = Texture::fromFile(device.get(), "tex.png", renderer->commandPool());
 auto uniforms = UniformBuffer<MVP>::create(device);  // Auto-discovers framesInFlight
 
 // Descriptors
@@ -906,15 +923,15 @@ auto pipeline = GraphicsPipeline::create(device, renderer->renderPass(), pipelin
     .dynamicViewportAndScissor()
     .build();
 
-// Loop - no manual frame index management needed
-while (!renderer->shouldClose()) {
-    renderer->pollEvents();
+// Loop - window handles events, renderer handles frames
+while (window->isOpen()) {
+    window->pollEvents();
     if (auto frame = renderer->beginFrame()) {
-        uniforms->update(*frame, mvpData);
-        auto cmd = renderer->beginRenderPass({0, 0, 0, 1});
-        cmd.bindPipeline(pipeline);
-        descriptors.bind(cmd);  // Automatically uses correct frame's descriptor set
-        mesh->draw(cmd);
+        uniforms->update(renderer->currentFrame(), mvpData);
+        renderer->beginRenderPass({0, 0, 0, 1});
+        frame.commandBuffer->bindPipeline(pipeline);
+        descriptors.bind(*frame.commandBuffer);  // Auto-selects correct frame's descriptor set
+        mesh->draw(frame);  // frame converts to CommandBuffer&
         renderer->endRenderPass();
         renderer->endFrame();
     }
