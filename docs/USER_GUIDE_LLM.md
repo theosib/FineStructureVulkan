@@ -143,8 +143,11 @@ Window:
     // State
     isOpen() -> bool
     close()
-    size() -> glm::uvec2
-    width(), height() -> uint32_t
+    size() -> glm::uvec2           // Framebuffer size in pixels
+    width(), height() -> uint32_t  // Framebuffer dimensions
+    windowSize() -> glm::uvec2     // Window size in screen coordinates
+    contentScale() -> glm::vec2    // HiDPI scale factor (e.g., 2.0 on Retina)
+    isHighDPI() -> bool            // True if contentScale > 1.0
     isMinimized() -> bool
     isFocused() -> bool
 

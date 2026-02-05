@@ -185,10 +185,30 @@ public:
     /// Request the window to close
     void close();
 
-    /// Get current window size
+    /// Get current framebuffer size in pixels (what Vulkan renders to)
     glm::uvec2 size() const;
     uint32_t width() const;
     uint32_t height() const;
+
+    /// Get window size in screen coordinates (may differ from framebuffer on HiDPI)
+    glm::uvec2 windowSize() const;
+
+    /**
+     * @brief Get the content scale factor for HiDPI displays
+     *
+     * Returns the ratio between framebuffer pixels and screen coordinates.
+     * On standard displays this is (1.0, 1.0). On Retina/HiDPI displays
+     * this might be (2.0, 2.0) or similar.
+     *
+     * Use this to scale UI elements, font sizes, etc. for proper appearance
+     * on high-DPI displays.
+     *
+     * @return Scale factor for X and Y axes
+     */
+    glm::vec2 contentScale() const;
+
+    /// Check if running on a high-DPI display (content scale > 1.0)
+    bool isHighDPI() const;
 
     /// Get the window title
     const std::string& title() const { return config_.title; }

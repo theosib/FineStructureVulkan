@@ -306,6 +306,23 @@ uint32_t Window::height() const {
     return size().y;
 }
 
+glm::uvec2 Window::windowSize() const {
+    int w, h;
+    glfwGetWindowSize(window_, &w, &h);
+    return {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+}
+
+glm::vec2 Window::contentScale() const {
+    float xscale, yscale;
+    glfwGetWindowContentScale(window_, &xscale, &yscale);
+    return {xscale, yscale};
+}
+
+bool Window::isHighDPI() const {
+    auto scale = contentScale();
+    return scale.x > 1.0f || scale.y > 1.0f;
+}
+
 void Window::setTitle(std::string_view title) {
     config_.title = std::string(title);
     glfwSetWindowTitle(window_, config_.title.c_str());

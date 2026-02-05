@@ -220,7 +220,23 @@ window->waitIdle();
 - Automatic swap chain creation and recreation on resize
 - Per-frame synchronization objects (semaphores + fences)
 - Keyboard and mouse event callbacks or polling
+- High-DPI (Retina) display detection
 - No direct GLFW dependency in your code
+
+**High-DPI Support:**
+```cpp
+// Check if on a high-DPI display
+if (window->isHighDPI()) {
+    // Scale UI elements appropriately
+    float scale = window->contentScale().x;  // Usually same for x and y
+    fontSize *= scale;
+}
+
+// Window size vs framebuffer size
+auto windowSize = window->windowSize();   // Screen coordinates (e.g., 800x600)
+auto fbSize = window->size();             // Pixels (e.g., 1600x1200 on Retina)
+auto scale = window->contentScale();      // Scale factor (e.g., 2.0, 2.0)
+```
 
 **Event Handling:**
 ```cpp
