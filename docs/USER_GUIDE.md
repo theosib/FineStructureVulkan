@@ -814,33 +814,36 @@ The Overlay2D class renders 2D elements (UI, crosshairs, HUD) in screen space:
 ```cpp
 #include <finevk/engine/overlay2d.hpp>
 
-// Create overlay (once during setup)
-auto overlay = finevk::Overlay2D::create(renderer->device(), renderer->renderPass())
+// Recommended: Create with SimpleRenderer for automatic frame tracking
+auto overlay = finevk::Overlay2D::create(renderer.get())
     .maxQuads(256)                           // Maximum quads per frame
-    .msaaSamples(renderer->msaaSamples())    // Match render pass
     .originTopLeft(true)                     // Standard UI convention
-    .build();  // framesInFlight auto-discovered from device
+    .build();  // framesInFlight and msaaSamples auto-discovered from renderer
 
-// In render loop
-overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
+// In render loop - 3D and 2D work together naturally
+if (auto frame = renderer->beginFrame()) {
+    renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
 
-// Draw solid color quad (x, y, width, height, color)
-overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+    // 3D content first
+    worldRenderer.render(frame);
 
-// Draw textured quad (x, y, width, height, texture, tint, uvRect)
-overlay->drawQuad(centerX - 16, centerY - 16, 32, 32,
-                  crosshairTexture.get(),
-                  {1.0f, 1.0f, 1.0f, 1.0f},        // White tint
-                  {0.0f, 0.0f, 1.0f, 1.0f});       // Full UV
+    // 2D overlay on top - no frame index needed!
+    overlay->beginFrame();  // Auto: uses renderer's frame index and extent
+    overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+    overlay->drawQuad(centerX - 16, centerY - 16, 32, 32, crosshairTexture.get());
+    overlay->drawCrosshair(centerX, centerY, 30.0f, 3.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    overlay->render(frame);
 
-// Convenience: crosshair (centerX, centerY, size, thickness, color)
-overlay->drawCrosshair(centerX, centerY, 30.0f, 3.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    renderer->endRenderPass();
+    renderer->endFrame();
+}
 
-// Render within pass (after 3D content)
-renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
-worldRenderer.render(cmd);
-overlay->render(cmd);  // Overlay on top
-renderer->endRenderPass();
+// Alternative: Manual mode (without SimpleRenderer)
+auto overlay2 = finevk::Overlay2D::create(device.get(), renderPass.get())
+    .maxQuads(256)
+    .msaaSamples(msaaSamples)
+    .build();
+overlay2->beginFrame(frameIndex, screenWidth, screenHeight);  // Explicit params required
 ```
 
 **Text Rendering with FontAtlas:**

@@ -1,6 +1,7 @@
 #include "finevk/engine/overlay2d.hpp"
 #include "finevk/engine/font_atlas.hpp"
 
+#include "finevk/high/simple_renderer.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/command.hpp"
@@ -252,6 +253,21 @@ void Overlay2D::updateProjection(uint32_t width, uint32_t height) {
     std::memcpy(uniformBuffers_[currentFrame_]->mappedPtr(), &uniform, sizeof(uniform));
 }
 
+void Overlay2D::beginFrame() {
+    if (!renderer_) {
+        throw std::runtime_error("Overlay2D::beginFrame() requires SimpleRenderer - use beginFrame(frameIndex, w, h)");
+    }
+    auto extent = renderer_->extent();
+    beginFrame(renderer_->currentFrame(), extent.width, extent.height);
+}
+
+void Overlay2D::beginFrame(uint32_t screenWidth, uint32_t screenHeight) {
+    if (!renderer_) {
+        throw std::runtime_error("Overlay2D::beginFrame(w, h) requires SimpleRenderer - use beginFrame(frameIndex, w, h)");
+    }
+    beginFrame(renderer_->currentFrame(), screenWidth, screenHeight);
+}
+
 void Overlay2D::beginFrame(uint32_t frameIndex, uint32_t screenWidth, uint32_t screenHeight) {
     currentFrame_ = frameIndex % framesInFlight_;
     batch_.clear();
@@ -468,6 +484,14 @@ void Overlay2D::render(CommandBuffer& cmd) {
 // Builder Implementation
 // =============================================================================
 
+Overlay2D::Builder::Builder(SimpleRenderer* renderer)
+    : device_(renderer->device())
+    , renderPass_(renderer->renderPass())
+    , renderer_(renderer)
+    , msaaSamples_(renderer->msaaSamples())
+{
+}
+
 Overlay2D::Builder::Builder(LogicalDevice* device, RenderPass* renderPass)
     : device_(device)
     , renderPass_(renderPass)
@@ -513,6 +537,7 @@ Overlay2DPtr Overlay2D::Builder::build() {
     overlay->device_ = device_;
     overlay->renderPass_ = renderPass_;
     overlay->commandPool_ = device_->defaultCommandPool();
+    overlay->renderer_ = renderer_;  // May be nullptr (manual mode)
     overlay->maxQuads_ = maxQuads_;
     overlay->framesInFlight_ = frames;
     overlay->originTopLeft_ = originTopLeft_;

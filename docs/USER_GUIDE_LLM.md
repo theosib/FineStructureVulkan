@@ -1133,6 +1133,16 @@ Renderable:
 ### Overlay2D - 2D Screen-Space Rendering
 
 ```cpp
+// Recommended: Create with SimpleRenderer (auto frame tracking)
+Overlay2D::create(SimpleRenderer*)
+    .maxQuads(uint32_t)              // Default: 1024
+    .originTopLeft(bool)             // Default: true
+    .vertexShader(path)              // Optional custom shader
+    .fragmentShader(path)            // Optional custom shader
+    .build() -> Overlay2DPtr
+    // Note: framesInFlight and msaaSamples auto-discovered from renderer
+
+// Manual mode: Create with device/renderPass
 Overlay2D::create(device, renderPass)
     .maxQuads(uint32_t)              // Default: 1024
     .framesInFlight(uint32_t)        // Default: auto (device->framesInFlight())
@@ -1143,7 +1153,11 @@ Overlay2D::create(device, renderPass)
     .build() -> Overlay2DPtr
 
 Overlay2D:
-    // Frame lifecycle (call once per frame)
+    // Frame lifecycle - automatic mode (requires SimpleRenderer)
+    beginFrame()                           // Uses renderer->currentFrame() and extent
+    beginFrame(screenWidth, screenHeight)  // Uses renderer->currentFrame()
+
+    // Frame lifecycle - manual mode
     beginFrame(frameIndex, screenWidth, screenHeight)
 
     // Drawing API (call between beginFrame and render)
@@ -1184,28 +1198,32 @@ struct OverlayQuadData {
 - No depth testing (always on top)
 - Batched by texture for efficient rendering
 - Uses internal 1x1 white texture for solid color quads
+- Automatic frame tracking when created with SimpleRenderer
 
-**Usage Pattern**:
+**Usage Pattern (Recommended)**:
 ```cpp
-// Setup (once) - framesInFlight auto-discovered from device
-auto overlay = Overlay2D::create(device, renderPass)
+// Setup (once) - create with SimpleRenderer
+auto overlay = Overlay2D::create(renderer.get())
     .maxQuads(256)
-    .msaaSamples(renderer->msaaSamples())
     .build();
 
-// Per-frame
-overlay->beginFrame(currentFrame, extent.width, extent.height);
+// Per-frame - 3D and 2D work together
+if (auto frame = renderer->beginFrame()) {
+    renderer->beginRenderPass(clearColor);
 
-// Queue draw calls
-overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});  // Solid color
-overlay->drawQuad(cx-16, cy-16, 32, 32, crosshairTex.get());   // Textured
-overlay->drawCrosshair(cx, cy, 30, 3, {1, 1, 1, 1});           // Helper
+    // 3D content first
+    worldRenderer.render(frame);
 
-// Render within pass (after 3D content)
-renderer->beginRenderPass(clearColor);
-worldRenderer.render(cmd);
-overlay->render(cmd);  // Overlay on top
-renderer->endRenderPass();
+    // 2D overlay on top - no frame index needed
+    overlay->beginFrame();  // Auto: uses renderer's frame and extent
+    overlay->drawQuad(10, 10, 200, 25, {0.2f, 0.2f, 0.2f, 0.8f});
+    overlay->drawQuad(cx-16, cy-16, 32, 32, crosshairTex.get());
+    overlay->drawCrosshair(cx, cy, 30, 3, {1, 1, 1, 1});
+    overlay->render(frame);
+
+    renderer->endRenderPass();
+    renderer->endFrame();
+}
 ```
 
 **Coordinate System**:

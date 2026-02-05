@@ -11,11 +11,12 @@ This document tracks API improvements identified during the tutorial-style code 
 
 The FineStructure API is well-designed with consistent patterns (builder pattern, smart pointers, overloads for different pointer types). The main opportunities for improvement are:
 
-1. **Hide Vulkan complexity** via RenderTarget abstraction (unify RenderPass/Framebuffer/Image)
-2. **Hide frame indexing** from developers (Material class manages per-frame resources internally)
-3. **Builder-first for loading** (Texture, Mesh) to avoid boolean argument confusion
-4. **Auto-create common resources** (Image default views, matching depth buffers)
-5. **Infer settings** where possible (MSAA from RenderTarget, depthTest from compareOp)
+1. **RenderSurface/FrameContext architecture** - Unified abstraction for swap chain and off-screen rendering with automatic frame tracking. Get a frame, render 3D and 2D to it, submit. No manual frame index management.
+2. **Hide Vulkan complexity** via RenderTarget abstraction (unify RenderPass/Framebuffer/Image)
+3. **Hide frame indexing** from developers (Material class manages per-frame resources internally)
+4. **Builder-first for loading** (Texture, Mesh) to avoid boolean argument confusion
+5. **Auto-create common resources** (Image default views, matching depth buffers)
+6. **Infer settings** where possible (MSAA from RenderTarget, depthTest from compareOp)
 
 ### Components Reviewed
 - Instance, Window, Surface ✓
@@ -39,6 +40,432 @@ The FineStructure API is well-designed with consistent patterns (builder pattern
 - SwapChain builder and lifecycle
 - Command buffer recording API
 - Vertex attribute flags and Mesh builder (procedural)
+
+---
+
+## RenderSurface and FrameContext Architecture (P1 - MAJOR)
+
+**Problem**: Frame index management is explicit and leaks to user code. The current architecture is tied to swap chains, but off-screen rendering also needs per-frame resource management. Additionally, 3D and 2D rendering should work smoothly together without the user managing frame indices.
+
+**Vision**: A unified abstraction where you "get a frame" from any render surface (swap chain or off-screen), render 3D and 2D content to it, and submit - without thinking about frame indices.
+
+### Existing Infrastructure Analysis
+
+FineVK already has several components that serve parts of this vision:
+
+| Proposed Concept | Existing FineVK Class | What It Provides |
+|-----------------|----------------------|------------------|
+| RenderSurface (where to render) | **RenderTarget** | RenderPass, Framebuffers, depth buffer, resize handling |
+| RenderSurface (synchronization) | **SimpleRenderer** | Frame lifecycle, command buffers, fences/semaphores |
+| FrameContext | **FrameBeginResult** | Command buffer, image index, implicit CommandBuffer& conversion |
+| Frame tracking | **Window** + **FrameInfo** | frameIndex, imageIndex, extent, sync primitives |
+
+**Key Insight**: Rather than creating entirely new abstractions, we should **extend existing classes** to fill the gaps:
+
+1. **SimpleRenderer** already works well for swap chain surfaces - keep it
+2. **RenderTarget** handles the "where" but not synchronization - use it internally
+3. **FrameBeginResult** is close to FrameContext - extend it with render pass methods
+4. **Create OffscreenSurface** as the missing piece for off-screen rendering
+
+### Extended FrameBeginResult (Minimal Change)
+
+Add render pass methods to the existing struct:
+
+```cpp
+// In simple_renderer.hpp - extend existing FrameBeginResult
+struct FrameBeginResult {
+    bool success = false;
+    bool resized = false;
+    uint32_t imageIndex = 0;
+    CommandBuffer* commandBuffer = nullptr;
+
+    // Existing
+    explicit operator bool() const { return success; }
+    operator CommandBuffer&() const { return *commandBuffer; }
+
+    // NEW: Render pass convenience (delegates to SimpleRenderer)
+    void beginRenderPass(const glm::vec4& clearColor = {0, 0, 0, 1});
+    void endRenderPass();
+
+    // NEW: Frame index for per-frame resources (rarely needed)
+    uint32_t frameIndex() const { return imageIndex; }  // For swap chains, these are the same
+
+private:
+    friend class SimpleRenderer;
+    SimpleRenderer* renderer_ = nullptr;  // Back-reference for render pass methods
+};
+```
+
+### Core Abstractions (Interface for Polymorphism)
+
+```cpp
+// RenderSurface - abstract interface for anything you can render to
+class RenderSurface {
+public:
+    virtual ~RenderSurface() = default;
+
+    // Get a frame to render to - returns nullopt if surface unavailable
+    virtual std::optional<FrameContext> beginFrame() = 0;
+
+    // Submit the frame for presentation/completion
+    virtual void endFrame() = 0;
+
+    // Surface properties
+    virtual uint32_t framesInFlight() const = 0;
+    virtual VkExtent2D extent() const = 0;
+    virtual RenderPass* renderPass() const = 0;
+    virtual VkFormat colorFormat() const = 0;
+    virtual VkSampleCountFlagBits msaaSamples() const = 0;
+};
+
+// FrameContext - everything needed to render to this frame
+class FrameContext {
+    RenderSurface* surface_;
+    uint32_t frameIndex_;
+    CommandBuffer* cmd_;
+
+public:
+    // Primary interface
+    CommandBuffer& cmd() { return *cmd_; }
+    VkExtent2D extent() const { return surface_->extent(); }
+    RenderPass* renderPass() const { return surface_->renderPass(); }
+
+    // For things that MUST know the frame index (rare)
+    uint32_t frameIndex() const { return frameIndex_; }
+
+    // Auto-select from per-frame resource arrays
+    template<typename T>
+    T& select(std::vector<T>& resources) {
+        return resources[frameIndex_];
+    }
+
+    // Implicit conversion to CommandBuffer& for existing APIs
+    operator CommandBuffer&() { return *cmd_; }
+
+    // Render pass management
+    void beginRenderPass(const glm::vec4& clearColor = {0, 0, 0, 1});
+    void endRenderPass();
+
+    // Check validity (for use in if-statements)
+    explicit operator bool() const { return cmd_ != nullptr; }
+};
+```
+
+### Concrete Surface Implementations
+
+**Option A: SimpleRenderer as SwapChainSurface (Recommended)**
+
+SimpleRenderer already provides swap chain frame management. Rather than creating a new SwapChainSurface class, we can:
+1. Add the `RenderSurface` interface to SimpleRenderer
+2. Enhance FrameBeginResult with render pass methods
+
+```cpp
+// SimpleRenderer gains RenderSurface interface
+class SimpleRenderer : public RenderSurface {
+public:
+    // Existing API (unchanged)
+    static std::unique_ptr<SimpleRenderer> create(Window* window, const RendererConfig& config = {});
+    FrameBeginResult beginFrame();  // Existing - returns FrameBeginResult
+    void endFrame();                // Existing
+
+    // RenderSurface interface (new - delegates to existing methods)
+    std::optional<FrameContext> beginFrameContext() override;
+    uint32_t framesInFlight() const override;
+    VkExtent2D extent() const override;      // Already exists
+    RenderPass* renderPass() const override;  // Already exists
+    VkFormat colorFormat() const override;
+    VkSampleCountFlagBits msaaSamples() const override;  // Already exists
+};
+```
+
+**Option B: New SwapChainSurface (If Clean Separation Preferred)**
+
+```cpp
+// Thin wrapper around SimpleRenderer implementing RenderSurface
+class SwapChainSurface : public RenderSurface {
+public:
+    static std::unique_ptr<SwapChainSurface> create(Window* window);
+
+    // Swap chain specific
+    bool vsyncEnabled() const;
+    void setVsync(bool enable);
+
+private:
+    std::unique_ptr<SimpleRenderer> renderer_;  // Composition
+};
+```
+
+**OffscreenSurface (New - The Missing Piece)**
+
+This is the main new class needed. It provides frame management for off-screen rendering.
+
+```cpp
+// Off-screen surface (render-to-texture) - uses RenderTarget internally
+class OffscreenSurface : public RenderSurface {
+public:
+    class Builder;
+    static Builder create(LogicalDevice* device);
+
+    // Access the rendered texture
+    Texture* colorTexture() const;
+    Texture* depthTexture() const;  // If depth enabled
+
+    // RenderSurface interface
+    std::optional<FrameContext> beginFrame() override;
+    void endFrame() override;
+    uint32_t framesInFlight() const override;
+    VkExtent2D extent() const override;
+    RenderPass* renderPass() const override;
+    VkFormat colorFormat() const override;
+    VkSampleCountFlagBits msaaSamples() const override;
+
+private:
+    RenderTargetPtr target_;        // Uses existing RenderTarget
+    CommandPoolPtr commandPool_;
+    std::vector<CommandBufferPtr> commandBuffers_;  // Per-frame
+    std::vector<FencePtr> fences_;  // Per-frame synchronization
+    uint32_t currentFrame_ = 0;
+};
+
+class OffscreenSurface::Builder {
+public:
+    Builder& size(uint32_t width, uint32_t height);
+    Builder& format(VkFormat format);
+    Builder& enableDepth(bool enable = true);
+    Builder& msaaSamples(VkSampleCountFlagBits samples);
+    Builder& framesInFlight(uint32_t count);  // Default: 1 (synchronous)
+    std::unique_ptr<OffscreenSurface> build();
+};
+```
+
+### Per-Frame Resource Helper
+
+```cpp
+// Manages per-frame copies of a resource automatically
+template<typename T>
+class PerFrameResource {
+    std::vector<T> resources_;
+
+public:
+    // Initialize from a surface (creates framesInFlight copies)
+    template<typename... Args>
+    PerFrameResource(RenderSurface& surface, Args&&... args) {
+        resources_.reserve(surface.framesInFlight());
+        for (uint32_t i = 0; i < surface.framesInFlight(); i++) {
+            resources_.emplace_back(std::forward<Args>(args)...);
+        }
+    }
+
+    // Get resource for current frame
+    T& get(const FrameContext& frame) {
+        return resources_[frame.frameIndex()];
+    }
+
+    // Direct access (for initialization)
+    T& operator[](size_t i) { return resources_[i]; }
+    size_t size() const { return resources_.size(); }
+};
+```
+
+### Usage: Game Loop with 3D + 2D
+
+```cpp
+// Setup
+auto surface = SwapChainSurface::create(window.get());
+auto overlay = Overlay2D::create(surface.get()).build();
+auto gui = GuiSystem::create(surface.get());
+
+// Game loop
+while (window->isOpen()) {
+    window->pollEvents();
+    input->update();
+
+    // Get a frame - all rendering goes here
+    if (auto frame = surface->beginFrame()) {
+        frame.beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});
+
+        // 3D content
+        skybox->render(frame);
+        terrain->render(frame);
+        entities->render(frame);
+
+        // 2D overlay (HUD elements without ImGui)
+        overlay->beginFrame(frame);
+        overlay->drawCrosshair(centerX, centerY, 30, 3, white);
+        overlay->drawText("FPS: " + fps, 10, 30, *font);
+        overlay->render(frame);
+
+        // GUI (ImGui-based menus)
+        gui->beginFrame(frame, deltaTime);
+        drawInventoryMenu();
+        drawPauseMenu();
+        gui->render(frame);
+
+        frame.endRenderPass();
+        surface->endFrame();
+    }
+
+    // CPU work while GPU renders
+    updateGameLogic(deltaTime);
+}
+```
+
+### Usage: Off-Screen Rendering (Inventory Preview)
+
+```cpp
+// Create an off-screen surface for item previews
+auto itemPreview = OffscreenSurface::create(device.get())
+    .size(128, 128)
+    .format(VK_FORMAT_R8G8B8A8_UNORM)
+    .framesInFlight(1)  // Synchronous - we need result immediately
+    .build();
+
+// Render item to texture
+if (auto frame = itemPreview->beginFrame()) {
+    frame.beginRenderPass({0, 0, 0, 0});  // Transparent background
+    itemModel->render(frame, itemRotation);
+    frame.endRenderPass();
+    itemPreview->endFrame();
+}
+
+// Use in GUI
+gui->registerTexture(itemPreview->colorTexture());
+ImGui::Image(itemPreviewHandle, ImVec2(64, 64));
+```
+
+### Usage: Multiple Render Targets
+
+```cpp
+// Shadow map (off-screen, depth only)
+auto shadowSurface = OffscreenSurface::create(device.get())
+    .size(2048, 2048)
+    .enableDepth(true)
+    .build();
+
+// Main rendering with shadows
+if (auto shadow = shadowSurface->beginFrame()) {
+    shadow.beginRenderPass();
+    terrain->renderDepthOnly(shadow, lightViewProj);
+    shadow.endRenderPass();
+    shadowSurface->endFrame();
+}
+
+if (auto frame = surface->beginFrame()) {
+    material->setShadowMap(shadowSurface->depthTexture());
+    // ... render scene with shadows
+}
+```
+
+### How Existing Classes Fit Together
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        RenderSurface (interface)                     │
+│  - beginFrame() → FrameContext                                       │
+│  - endFrame()                                                        │
+│  - extent(), renderPass(), colorFormat(), msaaSamples()              │
+└──────────────────────────────────────────────────────────────────────┘
+                    ▲                              ▲
+                    │                              │
+     ┌──────────────┴─────────────┐    ┌──────────┴──────────────┐
+     │    SimpleRenderer          │    │    OffscreenSurface      │
+     │    (swap chain surface)    │    │    (render-to-texture)   │
+     │                            │    │                          │
+     │  Uses internally:          │    │  Uses internally:        │
+     │  - Window (sync)           │    │  - RenderTarget          │
+     │  - SwapChain               │    │  - CommandPool           │
+     │  - RenderPass              │    │  - Fences                │
+     │  - Framebuffers            │    │                          │
+     └────────────────────────────┘    └──────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                         RenderTarget (existing)                       │
+│  Provides: RenderPass + Framebuffers + depth buffer                  │
+│  Used by: SimpleRenderer (internal), OffscreenSurface (internal)     │
+│  NOT a RenderSurface - lacks frame lifecycle/synchronization         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**RenderTarget Role**: RenderTarget is a **building block**, not a complete surface. It handles the static "where to render" part (RenderPass, Framebuffers, depth buffer) but doesn't manage frame lifecycle, command buffers, or synchronization. Both SimpleRenderer and OffscreenSurface use it internally.
+
+### Migration Path
+
+**No breaking changes required.** The existing API continues to work:
+
+```cpp
+// This continues to work exactly as before
+auto renderer = SimpleRenderer::create(window.get());
+if (auto frame = renderer->beginFrame()) {
+    renderer->beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});
+    mesh->draw(frame);
+    renderer->endRenderPass();
+    renderer->endFrame();
+}
+```
+
+**Enhanced usage** (once FrameBeginResult gains render pass methods):
+
+```cpp
+// Same code, but render pass methods on frame itself
+auto renderer = SimpleRenderer::create(window.get());
+if (auto frame = renderer->beginFrame()) {
+    frame.beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});  // NEW: on frame
+    mesh->draw(frame);
+    frame.endRenderPass();  // NEW: on frame
+    renderer->endFrame();
+}
+```
+
+**Polymorphic usage** (for code that works with any surface):
+
+```cpp
+void renderScene(RenderSurface& surface) {
+    if (auto frame = surface.beginFrame()) {
+        frame.beginRenderPass({0.1f, 0.1f, 0.1f, 1.0f});
+        // ... render ...
+        frame.endRenderPass();
+        surface.endFrame();
+    }
+}
+
+// Works with either
+renderScene(*swapChainRenderer);
+renderScene(*offscreenSurface);
+```
+
+### Implementation Notes
+
+1. **FrameContext lifetime**: FrameContext is valid only between beginFrame() and endFrame(). It holds a pointer to the surface's command buffer, not a copy.
+
+2. **Thread safety**: Each surface has its own synchronization. Multiple surfaces can be used from different threads if they have separate command pools.
+
+3. **Synchronization**: For off-screen surfaces with framesInFlight > 1, the surface manages fences internally. The user never sees them.
+
+4. **Existing classes already work**: Overlay2D, Material, etc. already accept `CommandBuffer&`, and FrameContext/FrameBeginResult have implicit conversion to `CommandBuffer&`. No changes required to existing render code:
+   ```cpp
+   // These already work because of implicit conversion
+   overlay->render(frame);   // frame converts to CommandBuffer&
+   mesh->draw(frame);        // frame converts to CommandBuffer&
+   ```
+
+5. **Overlay2D already supports automatic frame tracking**: When created with SimpleRenderer, Overlay2D can call `beginFrame()` without arguments - it queries the renderer for the current frame index internally.
+
+**Files to create/modify**:
+
+Minimal approach (recommended):
+- New: `include/finevk/rendering/render_surface.hpp` (interface only)
+- New: `include/finevk/rendering/frame_context.hpp`
+- New: `include/finevk/rendering/offscreen_surface.hpp` (the main new class)
+- New: `include/finevk/core/per_frame_resource.hpp`
+- Modify: `simple_renderer.hpp` to implement RenderSurface interface
+- Modify: `FrameBeginResult` to add beginRenderPass/endRenderPass convenience methods
+
+**What already exists and doesn't need changing**:
+- ✅ RenderTarget - provides RenderPass/Framebuffer management (used internally)
+- ✅ SimpleRenderer - provides swap chain frame lifecycle
+- ✅ FrameBeginResult - provides command buffer access with implicit conversion
+- ✅ Window/FrameInfo - provides frame synchronization for swap chains
+- ✅ Overlay2D - already supports automatic frame tracking via SimpleRenderer
 
 ---
 

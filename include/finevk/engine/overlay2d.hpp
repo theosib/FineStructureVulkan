@@ -24,6 +24,7 @@ class GraphicsPipeline;
 class PipelineLayout;
 class Buffer;
 class FontAtlas;
+class SimpleRenderer;
 
 /**
  * @brief Uniform data for 2D overlay rendering
@@ -56,28 +57,39 @@ struct OverlayQuadData {
  * - Alpha blending
  * - Depth testing disabled (always on top)
  * - Custom shader support via builder
+ * - Automatic frame tracking when created with SimpleRenderer
  *
- * Usage:
+ * Usage (recommended - with SimpleRenderer):
  * @code
  * // Setup (once)
- * auto overlay = Overlay2D::create(device, renderPass)
+ * auto overlay = Overlay2D::create(renderer.get())
  *     .maxQuads(256)
  *     .build();
  *
- * // Per-frame rendering
+ * // Per-frame rendering (frame index and size auto-detected)
+ * if (auto frame = renderer->beginFrame()) {
+ *     renderer->beginRenderPass(clearColor);
+ *
+ *     // 3D content first
+ *     mesh->draw(frame);
+ *
+ *     // 2D overlay on top
+ *     overlay->beginFrame();  // Auto: uses renderer's frame and extent
+ *     overlay->drawQuad(cx - 16, cy - 16, 32, 32, crosshairTexture.get());
+ *     overlay->drawQuad(10, 10, 200, 20, {0.2f, 0.2f, 0.2f, 0.8f});
+ *     overlay->render(frame);
+ *
+ *     renderer->endRenderPass();
+ *     renderer->endFrame();
+ * }
+ * @endcode
+ *
+ * Usage (manual - without SimpleRenderer):
+ * @code
+ * auto overlay = Overlay2D::create(device, renderPass).build();
  * overlay->beginFrame(frameIndex, windowWidth, windowHeight);
- *
- * // Draw textured quad (e.g., crosshair texture)
- * overlay->drawQuad(cx - 16, cy - 16, 32, 32, crosshairTexture.get());
- *
- * // Draw solid color quad (e.g., health bar background)
- * overlay->drawQuad(10, 10, 200, 20, {0.2f, 0.2f, 0.2f, 0.8f});
- *
- * // Render within pass (after 3D content)
- * renderer->beginRenderPass(clearColor);
- * worldRenderer.render(cmd);
+ * // ... draw ...
  * overlay->render(cmd);
- * renderer->endRenderPass();
  * @endcode
  */
 class Overlay2D {
@@ -85,7 +97,22 @@ public:
     class Builder;
 
     /**
-     * @brief Create a builder for Overlay2D
+     * @brief Create a builder for Overlay2D using SimpleRenderer (recommended)
+     *
+     * When created with SimpleRenderer, beginFrame() can be called without
+     * arguments - the frame index and screen dimensions are obtained automatically.
+     *
+     * @param renderer SimpleRenderer to use for automatic frame tracking
+     */
+    static Builder create(SimpleRenderer* renderer);
+    static Builder create(SimpleRenderer& renderer);
+
+    /**
+     * @brief Create a builder for Overlay2D (manual mode)
+     *
+     * When created without SimpleRenderer, beginFrame() requires explicit
+     * frame index and screen dimensions.
+     *
      * @param device Logical device
      * @param renderPass Render pass to render into
      */
@@ -96,8 +123,35 @@ public:
     // =========================================================================
 
     /**
-     * @brief Begin a new frame for overlay rendering
+     * @brief Begin a new frame for overlay rendering (automatic mode)
      *
+     * Uses SimpleRenderer to automatically obtain frame index and screen dimensions.
+     * Only available when created with Overlay2D::create(SimpleRenderer*).
+     *
+     * Call this at the start of each frame before any drawQuad calls.
+     * Clears the quad batch and updates the projection matrix.
+     *
+     * @throws std::runtime_error if created without SimpleRenderer
+     */
+    void beginFrame();
+
+    /**
+     * @brief Begin a new frame with explicit screen dimensions (semi-automatic mode)
+     *
+     * Uses SimpleRenderer to obtain frame index, but allows custom screen dimensions.
+     * Useful when rendering to a viewport smaller than the swap chain.
+     * Only available when created with Overlay2D::create(SimpleRenderer*).
+     *
+     * @param screenWidth Viewport width in pixels
+     * @param screenHeight Viewport height in pixels
+     * @throws std::runtime_error if created without SimpleRenderer
+     */
+    void beginFrame(uint32_t screenWidth, uint32_t screenHeight);
+
+    /**
+     * @brief Begin a new frame for overlay rendering (manual mode)
+     *
+     * Explicit version for when created without SimpleRenderer.
      * Call this at the start of each frame before any drawQuad calls.
      * Clears the quad batch and updates the projection matrix.
      *
@@ -280,6 +334,7 @@ private:
     LogicalDevice* device_ = nullptr;
     RenderPass* renderPass_ = nullptr;
     CommandPool* commandPool_ = nullptr;
+    SimpleRenderer* renderer_ = nullptr;  // Optional - for automatic frame tracking
     uint32_t maxQuads_ = 1024;
     uint32_t framesInFlight_ = 3;
     bool originTopLeft_ = true;
@@ -320,6 +375,10 @@ private:
  */
 class Overlay2D::Builder {
 public:
+    /// Construct with SimpleRenderer (recommended - enables automatic frame tracking)
+    explicit Builder(SimpleRenderer* renderer);
+
+    /// Construct with device and render pass (manual frame tracking)
     Builder(LogicalDevice* device, RenderPass* renderPass);
 
     /**
@@ -371,8 +430,9 @@ public:
     Overlay2DPtr build();
 
 private:
-    LogicalDevice* device_;
-    RenderPass* renderPass_;
+    LogicalDevice* device_ = nullptr;
+    RenderPass* renderPass_ = nullptr;
+    SimpleRenderer* renderer_ = nullptr;
     std::string vertexShaderPath_;
     std::string fragmentShaderPath_;
     uint32_t maxQuads_ = 1024;
@@ -382,6 +442,14 @@ private:
 };
 
 // Inline definitions (after Builder is complete)
+inline Overlay2D::Builder Overlay2D::create(SimpleRenderer* renderer) {
+    return Builder(renderer);
+}
+
+inline Overlay2D::Builder Overlay2D::create(SimpleRenderer& renderer) {
+    return Builder(&renderer);
+}
+
 inline Overlay2D::Builder Overlay2D::create(LogicalDevice* device, RenderPass* renderPass) {
     return Builder(device, renderPass);
 }
