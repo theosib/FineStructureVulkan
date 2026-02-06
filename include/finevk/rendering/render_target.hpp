@@ -1,8 +1,10 @@
 #pragma once
 
 #include "finevk/core/types.hpp"
+#include "finevk/rendering/deletion_queue.hpp"
 
 #include <vulkan/vulkan.h>
+#include <glm/glm.hpp>
 #include <vector>
 #include <memory>
 #include <array>
@@ -30,6 +32,7 @@ struct ClearColor {
     ClearColor() = default;
     ClearColor(float r_, float g_, float b_, float a_ = 1.0f)
         : r(r_), g(g_), b(b_), a(a_) {}
+    ClearColor(const glm::vec4& v) : r(v.r), g(v.g), b(v.b), a(v.a) {}
 
     // Initializer list constructor for {r, g, b, a} syntax
     ClearColor(std::initializer_list<float> list) {
@@ -151,8 +154,13 @@ public:
      *
      * For window targets, this is called automatically in begin() when
      * a size mismatch is detected. Can also be called manually.
+     *
+     * @param dq Optional DeletionQueue for frame-safe deferred cleanup.
+     *           When provided, old resources are pushed to the queue instead
+     *           of being destroyed immediately. The render pass is never
+     *           recreated (it depends on formats/MSAA, not dimensions).
      */
-    void recreate();
+    void recreate(DeletionQueue* dq = nullptr);
 
     /// Destructor
     ~RenderTarget();

@@ -11,7 +11,7 @@
 
 namespace finevk {
 
-
+class RenderSurface;
 class LogicalDevice;
 class DescriptorSetLayout;
 class DescriptorPool;
@@ -61,6 +61,16 @@ public:
     static Builder create(const LogicalDevicePtr& device, uint32_t framesInFlight = 0);
 
     /**
+     * @brief Create a builder with automatic frame tracking
+     * @param surface Render surface (provides device, framesInFlight, and auto frame index)
+     *
+     * When created from a RenderSurface, currentFrame() is auto-queried
+     * from the surface — no need to call setFrameIndex() each frame.
+     */
+    static Builder create(RenderSurface* surface);
+    static Builder create(RenderSurface& surface);
+
+    /**
      * @brief Get the descriptor set layout
      */
     DescriptorSetLayout* layout() const { return layout_.get(); }
@@ -76,9 +86,17 @@ public:
     VkDescriptorSet descriptorSet() const;
 
     /**
-     * @brief Set current frame index (for automatic frame selection)
+     * @brief Set current frame index (for manual frame selection)
+     *
+     * Not needed when created from a RenderSurface — frame index is
+     * auto-queried from the surface in that case.
      */
     void setFrameIndex(uint32_t frameIndex) { currentFrame_ = frameIndex; }
+
+    /**
+     * @brief Get the render surface (null if created from device directly)
+     */
+    RenderSurface* surface() const { return surface_; }
 
     /**
      * @brief Update uniform buffer for current frame
@@ -88,9 +106,10 @@ public:
      */
     template<typename T>
     void update(uint32_t binding, const T& data) {
+        uint32_t frame = activeFrame();
         auto it = uniformBuffers_.find(binding);
-        if (it != uniformBuffers_.end() && currentFrame_ < it->second.size()) {
-            Buffer* buffer = it->second[currentFrame_].get();
+        if (it != uniformBuffers_.end() && frame < it->second.size()) {
+            Buffer* buffer = it->second[frame].get();
             if (buffer && buffer->mappedPtr()) {
                 std::memcpy(buffer->mappedPtr(), &data, sizeof(T));
             }
@@ -144,7 +163,11 @@ private:
 
     void cleanup();
 
+    /// Get current frame index (auto from surface or manual)
+    uint32_t activeFrame() const;
+
     LogicalDevice* device_ = nullptr;
+    RenderSurface* surface_ = nullptr;
     uint32_t framesInFlight_ = 0;
     uint32_t currentFrame_ = 0;
 
@@ -190,6 +213,8 @@ public:
     MaterialPtr build();
 
 private:
+    friend class Material;
+
     struct BindingInfo {
         uint32_t binding;
         VkDescriptorType type;
@@ -201,6 +226,7 @@ private:
                     VkShaderStageFlags stages, size_t uniformSize = 0);
 
     LogicalDevice* device_;
+    RenderSurface* surface_ = nullptr;
     uint32_t framesInFlight_;
     std::vector<BindingInfo> bindings_;
 };
@@ -212,6 +238,10 @@ inline Material::Builder Material::create(LogicalDevice& device, uint32_t frames
 
 inline Material::Builder Material::create(const LogicalDevicePtr& device, uint32_t framesInFlight) {
     return create(device.get(), framesInFlight);
+}
+
+inline Material::Builder Material::create(RenderSurface& surface) {
+    return create(&surface);
 }
 
 } // namespace finevk

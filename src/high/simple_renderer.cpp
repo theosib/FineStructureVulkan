@@ -9,13 +9,29 @@
 #include "finevk/device/command.hpp"
 #include "finevk/rendering/swapchain.hpp"
 #include "finevk/rendering/renderpass.hpp"
-#include "finevk/rendering/framebuffer.hpp"
+#include "finevk/rendering/render_target.hpp"
 #include "finevk/window/window.hpp"
 
 #include <stdexcept>
 #include <algorithm>
 
 namespace finevk {
+
+// ============================================================================
+// FrameBeginResult convenience methods
+// ============================================================================
+
+void FrameBeginResult::beginRenderPass(const glm::vec4& clearColor) {
+    if (renderer_) renderer_->beginRenderPass(clearColor);
+}
+
+void FrameBeginResult::endRenderPass() {
+    if (renderer_) renderer_->endRenderPass();
+}
+
+// ============================================================================
+// SimpleRenderer
+// ============================================================================
 
 static VkSampleCountFlagBits selectMsaaSamples(LogicalDevice* device, MSAALevel level) {
     auto* physDevice = device->physicalDevice();
@@ -40,25 +56,25 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     renderer->config_ = config;
 
     // Select MSAA sample count based on config and hardware support
-    renderer->msaaSamples_ = selectMsaaSamples(renderer->device(), config.msaa);
+    auto msaaSamples = selectMsaaSamples(window->device(), config.msaa);
 
-    if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+    if (msaaSamples != VK_SAMPLE_COUNT_1_BIT) {
         FINEVK_INFO(LogCategory::Core, "MSAA enabled: " +
-            std::to_string(static_cast<int>(renderer->msaaSamples_)) + "x");
+            std::to_string(static_cast<int>(msaaSamples)) + "x");
     }
 
     // Use device's default command pool
-    renderer->commandPool_ = renderer->device()->defaultCommandPool();
+    renderer->commandPool_ = window->device()->defaultCommandPool();
 
-    // Create rendering resources
-    renderer->createRenderPass();
-    if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
-        renderer->createColorResources();
-    }
+    // Create RenderTarget (handles render pass, framebuffers, depth, MSAA)
+    auto builder = RenderTarget::create(window->device()).window(window);
     if (config.enableDepthBuffer) {
-        renderer->createDepthResources();
+        builder.enableDepth();
     }
-    renderer->createFramebuffers();
+    if (msaaSamples != VK_SAMPLE_COUNT_1_BIT) {
+        builder.msaa(msaaSamples);
+    }
+    renderer->renderTarget_ = builder.build();
 
     // Create command buffers and deletion queue for each frame in flight
     uint32_t framesInFlight = window->framesInFlight();
@@ -71,7 +87,7 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
 
     // Register for device destruction notification so we can clean up
     // our resources before the device is destroyed
-    renderer->deviceDestructionCallbackId_ = renderer->device()->onDestruction(
+    renderer->deviceDestructionCallbackId_ = window->device()->onDestruction(
         [r = renderer.get()](LogicalDevice*) {
             // Flush deferred deletions before releasing device resources
             if (r->deletionQueue_) {
@@ -79,13 +95,8 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
             }
             // Clean up all device-dependent resources
             r->commandBuffers_.clear();
-            r->commandPool_ = nullptr;  // Non-owning, just clear the pointer
-            r->framebuffers_.reset();
-            r->colorView_.reset();
-            r->colorImage_.reset();
-            r->depthView_.reset();
-            r->depthImage_.reset();
-            r->renderPass_.reset();
+            r->commandPool_ = nullptr;
+            r->renderTarget_.reset();
             r->defaultSampler_.reset();
             r->deviceDestructionCallbackId_ = 0;
             FINEVK_DEBUG(LogCategory::Core, "SimpleRenderer resources released (device destroying)");
@@ -98,113 +109,45 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     return renderer;
 }
 
-void SimpleRenderer::createRenderPass() {
-    // Find depth format if needed
-    if (config_.enableDepthBuffer) {
-        auto* physDevice = device()->physicalDevice();
-        depthFormat_ = physDevice->capabilities().selectDepthFormat(physDevice->handle());
-    }
-
-    // Use the simple render pass factory
-    renderPass_ = RenderPass::createSimple(
-        device(),
-        window_->format(),
-        depthFormat_,
-        msaaSamples_,
-        true);  // for presentation
-}
-
-void SimpleRenderer::createColorResources() {
-    auto ext = extent();
-
-    // Create MSAA color buffer
-    colorImage_ = Image::createColorAttachment(
-        device(),
-        ext.width,
-        ext.height,
-        window_->format(),
-        msaaSamples_);
-
-    colorView_ = colorImage_->createView(VK_IMAGE_ASPECT_COLOR_BIT);
-}
-
-void SimpleRenderer::createDepthResources() {
-    auto ext = extent();
-
-    depthImage_ = Image::createDepthBuffer(
-        device(),
-        ext.width,
-        ext.height,
-        msaaSamples_);
-
-    depthView_ = depthImage_->createView(VK_IMAGE_ASPECT_DEPTH_BIT);
-}
-
-void SimpleRenderer::createFramebuffers() {
-    // For MSAA, we need color -> depth -> resolve order
-    // For non-MSAA, we just need color -> depth
-    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
-        // With MSAA: framebuffer attachments are [color MSAA, depth, resolve]
-        framebuffers_ = std::make_unique<SwapChainFramebuffers>(
-            swapChain(),
-            renderPass_.get(),
-            colorView_.get(),
-            depthView_.get());
-    } else {
-        framebuffers_ = std::make_unique<SwapChainFramebuffers>(
-            swapChain(),
-            renderPass_.get(),
-            depthView_.get());
-    }
-}
-
 void SimpleRenderer::recreateResources() {
-    // Defer old resources to DeletionQueue — they may still be referenced
-    // by in-flight frames. The render pass is NOT recreated because it only
-    // depends on formats and MSAA sample count, not dimensions.
-    // Push order matters: framebuffers -> views -> images (views reference images).
-    if (deletionQueue_) {
-        deletionQueue_->push(
-            std::shared_ptr<SwapChainFramebuffers>(framebuffers_.release()));
-        if (colorView_)
-            deletionQueue_->push(
-                std::shared_ptr<ImageView>(colorView_.release()));
-        if (depthView_)
-            deletionQueue_->push(
-                std::shared_ptr<ImageView>(depthView_.release()));
-        if (colorImage_)
-            deletionQueue_->push(
-                std::shared_ptr<Image>(colorImage_.release()));
-        if (depthImage_)
-            deletionQueue_->push(
-                std::shared_ptr<Image>(depthImage_.release()));
+    // Delegate to RenderTarget with DeletionQueue for frame-safe cleanup.
+    // Old resources (framebuffers, depth/MSAA images) are deferred;
+    // the render pass is never recreated (formats/MSAA don't change on resize).
+    if (renderTarget_) {
+        renderTarget_->recreate(deletionQueue_.get());
     }
-
-    // Create new resources at the current window size
-    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
-        createColorResources();
-    }
-    if (config_.enableDepthBuffer) {
-        createDepthResources();
-    }
-    createFramebuffers();
 
     FINEVK_DEBUG(LogCategory::Core, "SimpleRenderer resources recreated: " +
         std::to_string(extent().width) + "x" +
         std::to_string(extent().height));
 }
 
-void SimpleRenderer::cleanupResources() {
-    framebuffers_.reset();
-    colorView_.reset();
-    colorImage_.reset();
-    depthView_.reset();
-    depthImage_.reset();
-}
+// ============================================================================
+// RenderSurface interface implementation
+// ============================================================================
 
-// Accessors that delegate to Window
 LogicalDevice* SimpleRenderer::device() const {
     return window_->device();
+}
+
+RenderPass* SimpleRenderer::renderPass() const {
+    return renderTarget_ ? renderTarget_->renderPass() : nullptr;
+}
+
+VkExtent2D SimpleRenderer::extent() const {
+    return renderTarget_ ? renderTarget_->extent() : VkExtent2D{};
+}
+
+VkFormat SimpleRenderer::colorFormat() const {
+    return renderTarget_ ? renderTarget_->colorFormat() : VK_FORMAT_UNDEFINED;
+}
+
+VkFormat SimpleRenderer::depthFormat() const {
+    return renderTarget_ ? renderTarget_->depthFormat() : VK_FORMAT_UNDEFINED;
+}
+
+VkSampleCountFlagBits SimpleRenderer::msaaSamples() const {
+    return renderTarget_ ? renderTarget_->msaaSamples() : VK_SAMPLE_COUNT_1_BIT;
 }
 
 SwapChain* SimpleRenderer::swapChain() const {
@@ -219,13 +162,9 @@ uint32_t SimpleRenderer::currentFrame() const {
     return window_->currentFrame();
 }
 
-VkExtent2D SimpleRenderer::extent() const {
-    return window_->extent();
-}
-
-VkFormat SimpleRenderer::colorFormat() const {
-    return window_->format();
-}
+// ============================================================================
+// Frame lifecycle
+// ============================================================================
 
 FrameBeginResult SimpleRenderer::beginFrame() {
     FrameBeginResult result{};
@@ -249,13 +188,12 @@ FrameBeginResult SimpleRenderer::beginFrame() {
         deletionQueue_->beginFrame(currentFrameInfo_->frameIndex);
     }
 
-    // Check if we need to recreate our resources
-    auto currentExtent = extent();
-    if (framebuffers_ && framebuffers_->count() > 0) {
-        // Check if size changed - if so, recreate
-        auto fbExtent = (*framebuffers_)[0].extent();
-        if (fbExtent.width != currentExtent.width ||
-            fbExtent.height != currentExtent.height) {
+    // Check if we need to recreate our resources (size changed)
+    if (renderTarget_) {
+        auto currentExtent = window_->extent();
+        auto targetExtent = renderTarget_->extent();
+        if (targetExtent.width != currentExtent.width ||
+            targetExtent.height != currentExtent.height) {
             recreateResources();
         }
     }
@@ -267,64 +205,31 @@ FrameBeginResult SimpleRenderer::beginFrame() {
 
     result.success = true;
     result.imageIndex = currentImageIndex_;
+    result.extent = extent();
     result.commandBuffer = &cmd;
+    result.renderer_ = this;
+    result.frameIndex_ = currentFrameInfo_->frameIndex;
     frameInProgress_ = true;
 
     return result;
 }
 
 void SimpleRenderer::beginRenderPass(const glm::vec4& clearColor) {
-    if (!frameInProgress_ || !currentFrameInfo_) {
+    if (!frameInProgress_ || !currentFrameInfo_ || !renderTarget_) {
         return;
     }
 
     auto& cmd = *commandBuffers_[currentFrameInfo_->frameIndex];
-    auto& framebuffer = (*framebuffers_)[currentImageIndex_];
-
-    std::vector<VkClearValue> clearValues;
-
-    // Color clear (MSAA or direct)
-    VkClearValue colorClear{};
-    colorClear.color = {{clearColor.r, clearColor.g, clearColor.b, clearColor.a}};
-    clearValues.push_back(colorClear);
-
-    // Depth clear
-    if (config_.enableDepthBuffer) {
-        VkClearValue depthClear{};
-        depthClear.depthStencil = {1.0f, 0};
-        clearValues.push_back(depthClear);
-    }
-
-    // Resolve attachment clear (for MSAA)
-    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
-        clearValues.push_back(colorClear);  // Resolve target
-    }
-
-    VkRect2D renderArea{};
-    renderArea.offset = {0, 0};
-    renderArea.extent = currentFrameInfo_->extent;
-
-    cmd.beginRenderPass(
-        renderPass_->handle(),
-        framebuffer.handle(),
-        renderArea,
-        clearValues);
-
-    // Set viewport and scissor
-    cmd.setViewport(0, 0,
-        static_cast<float>(currentFrameInfo_->extent.width),
-        static_cast<float>(currentFrameInfo_->extent.height));
-    cmd.setScissor(0, 0,
-        currentFrameInfo_->extent.width,
-        currentFrameInfo_->extent.height);
+    renderTarget_->begin(cmd, ClearColor{clearColor});
 }
 
 void SimpleRenderer::endRenderPass() {
-    if (!frameInProgress_ || !currentFrameInfo_) {
+    if (!frameInProgress_ || !currentFrameInfo_ || !renderTarget_) {
         return;
     }
 
-    commandBuffers_[currentFrameInfo_->frameIndex]->endRenderPass();
+    auto& cmd = *commandBuffers_[currentFrameInfo_->frameIndex];
+    renderTarget_->end(cmd);
 }
 
 bool SimpleRenderer::endFrame() {
@@ -379,6 +284,20 @@ void SimpleRenderer::waitIdle() {
     }
 }
 
+// ============================================================================
+// Deferred deletion
+// ============================================================================
+
+void SimpleRenderer::deferDelete(std::function<void()> deleter) {
+    if (deletionQueue_) {
+        deletionQueue_->push(std::move(deleter));
+    }
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
 Sampler* SimpleRenderer::defaultSampler() {
     if (!defaultSampler_) {
         auto* physDevice = device()->physicalDevice();
@@ -398,12 +317,6 @@ Sampler* SimpleRenderer::defaultSampler() {
         defaultSampler_ = builder.build();
     }
     return defaultSampler_.get();
-}
-
-void SimpleRenderer::deferDelete(std::function<void()> deleter) {
-    if (deletionQueue_) {
-        deletionQueue_->push(std::move(deleter));
-    }
 }
 
 SimpleRenderer::~SimpleRenderer() {

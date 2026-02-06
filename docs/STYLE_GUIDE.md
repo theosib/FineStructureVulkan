@@ -130,9 +130,9 @@ The frame lifecycle is the most important abstraction. The developer should neve
 while (window->isOpen()) {
     window->pollEvents();
     if (auto frame = renderer->beginFrame()) {
-        renderer->beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
+        frame.beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
         // draw things using frame (implicit CommandBuffer&)
-        renderer->endRenderPass();
+        frame.endRenderPass();
         renderer->endFrame();
     }
 }
@@ -145,7 +145,11 @@ while (window->isOpen()) {
 - DeletionQueue drain for this frame slot
 - Resize detection and resource recreation
 
-**Implicit conversion:** `FrameBeginResult` converts to `CommandBuffer&` so it can be passed directly to draw methods.
+**FrameBeginResult features:**
+- Converts to `CommandBuffer&` so it can be passed directly to draw methods
+- `beginRenderPass()` / `endRenderPass()` convenience methods (delegates to renderer)
+- `extent` field for current frame dimensions (useful for aspect ratio)
+- `frameIndex()` for frame slot index (0 to framesInFlight-1)
 
 ---
 
@@ -193,7 +197,7 @@ finevk-core (no game engine assumptions)
 ├── core/       Instance, Surface, Debug, Logging
 ├── device/     PhysicalDevice, LogicalDevice, Buffer, Image, Sampler, Command
 ├── rendering/  SwapChain, RenderPass, Pipeline, Framebuffer, Sync, Descriptors,
-│               RenderTarget, DeletionQueue
+│               RenderTarget, RenderSurface, OffscreenSurface, DeletionQueue
 ├── high/       SimpleRenderer, Texture, Mesh, Material, UniformBuffer
 └── window/     Window
 
@@ -228,16 +232,20 @@ Each level builds on the previous. Documentation should lead with Level 1 and on
 Based on the philosophy above, these are the areas where the current code deviates from the ideal:
 
 1. ~~**Resize uses `waitIdle()`**~~ **RESOLVED** - `SimpleRenderer::recreateResources()` now uses DeletionQueue to defer old framebuffers/depth/MSAA images. No `waitIdle()` in the resize path.
-2. **Swap chain index sometimes leaks** - `FrameBeginResult::imageIndex` and `FrameInfo::imageIndex` expose internal mechanics. Users drawing through SimpleRenderer never need these.
-3. **Redundant mechanics in examples** - The `viking_room` example manually sizes descriptor pools, manually writes descriptor sets per frame, manually passes vertex binding descriptions. Much of this could be automated by `Material`.
-4. **SimpleRenderer and RenderTarget overlap** - Both manage render pass + framebuffers + depth. Duplication reduced (shared `DeviceCapabilities::selectDepthFormat()` and `selectMSAA()`), but full unification is a future goal.
+2. **Swap chain index sometimes leaks** - `FrameBeginResult::imageIndex` and `FrameInfo::imageIndex` expose internal mechanics. Users drawing through SimpleRenderer never need these. Partially addressed: `frameIndex()` provides the frame slot index; `imageIndex` remains for advanced pipeline use.
+3. ~~**Redundant mechanics in examples**~~ **RESOLVED** - The `viking_room` example now uses `Material` for descriptor management, modern `Mesh::load()` / `Texture::load()` builders, and `frame.beginRenderPass()` convenience methods.
+4. ~~**SimpleRenderer and RenderTarget overlap**~~ **RESOLVED** - SimpleRenderer now inherits `RenderSurface` and fully delegates render pass, framebuffers, depth, and MSAA to `RenderTarget` internally.
 5. ~~**No automatic resize for RenderTarget**~~ **RESOLVED** - `RenderTarget::begin()` auto-detects resize for window targets.
 
 ---
 
 ## Proposed Next Steps
 
-1. **Unify SimpleRenderer and RenderTarget** - Make drawing to a window and off-screen look identical
-2. **Improve the viking_room example** - Show Material-based workflow instead of manual descriptors
+1. ~~**Unify SimpleRenderer and RenderTarget**~~ **DONE** - `RenderSurface` interface unifies window and off-screen rendering. `OffscreenSurface` provides render-to-texture.
+2. ~~**Improve the viking_room example**~~ **DONE** - Now uses Material, modern builders, and `frame.beginRenderPass()`.
 3. **Hide swap chain index** from the standard API path (keep accessible at Level 3+)
-4. **Material auto frame tracking** - Auto-discover current frame from SimpleRenderer
+4. ~~**Material auto frame tracking**~~ **DONE** - `Material::create(RenderSurface&)` auto-queries `currentFrame()` from the surface.
+
+### Remaining opportunities
+- **Pipeline `vertexFormat()` convenience** - Builder helper that auto-configures vertex bindings from `VertexAttribute` flags
+- **PerFrameResource<T>** - Generic helper for per-frame-slot resources (uniform buffers, descriptor sets, etc.)

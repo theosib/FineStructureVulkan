@@ -252,7 +252,7 @@ void RenderTarget::end(CommandBuffer& cmd) {
     cmd.endRenderPass();
 }
 
-void RenderTarget::recreate() {
+void RenderTarget::recreate(DeletionQueue* dq) {
     // Update extent
     if (window_) {
         auto* swapChain = window_->swapChain();
@@ -263,21 +263,38 @@ void RenderTarget::recreate() {
         extent_ = {colorImage_->width(), colorImage_->height()};
     }
 
-    // Recreate MSAA resources if we own them
-    if (msaaColorImage_) {
+    if (dq) {
+        // Frame-safe: defer old resources to DeletionQueue.
+        // Push order: framebuffers -> views -> images (views reference images).
+        for (auto& fb : framebuffers_) {
+            dq->push(std::shared_ptr<Framebuffer>(fb.release()));
+        }
+        framebuffers_.clear();
+        if (msaaColorView_)
+            dq->push(std::shared_ptr<ImageView>(msaaColorView_.release()));
+        if (msaaColorImage_)
+            dq->push(std::shared_ptr<Image>(msaaColorImage_.release()));
+        if (depthImage_)
+            dq->push(std::shared_ptr<Image>(depthImage_.release()));
+    } else {
+        // Immediate cleanup (original behavior)
+        framebuffers_.clear();
         msaaColorView_.reset();
         msaaColorImage_.reset();
+        depthImage_.reset();
+    }
+
+    // Recreate MSAA resources if needed
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         createMsaaResources();
     }
 
-    // Recreate depth resources if we own them
-    if (depthImage_) {
-        depthImage_.reset();
+    // Recreate depth resources if needed
+    if (hasDepth()) {
         createDepthResources();
     }
 
     // Recreate framebuffers
-    framebuffers_.clear();
     createFramebuffers();
 
     FINEVK_DEBUG(LogCategory::Render, "RenderTarget recreated: " +

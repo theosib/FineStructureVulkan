@@ -18,7 +18,7 @@ Errors:     Throws std::runtime_error on failure
 
 **DO NOT:**
 - Manually size descriptor pools — use `DescriptorPool::fromLayout(layout, setCount)` or `Material`
-- Manually track frame indices — use `renderer->currentFrame()` or auto-tracking APIs
+- Manually track frame indices — use `Material::create(RenderSurface&)` for auto tracking, or `renderer->currentFrame()`
 - Manually manage fences/semaphores — `SimpleRenderer::beginFrame()` handles synchronization
 - Destroy GPU resources immediately — use `renderer->deferDelete(std::move(resource))`
 - Call `device->waitIdle()` in the frame loop — use DeletionQueue for per-resource sync
@@ -28,13 +28,17 @@ Errors:     Throws std::runtime_error on failure
 - Use legacy APIs (`fromFile`, `fromMemory`, `loadOBJ`, `fromOBJ`) — use `Texture::load()` / `Mesh::load()` builders
 - Set pipeline `samples()` without matching the render pass — use `renderer->msaaSamples()`
 - Manually write descriptor sets per frame — use `Material` for automatic per-frame management
+- Create a separate render pass for overlay/GUI rendering — share SimpleRenderer's render pass instead
+- Call `device->waitIdle()` to safely destroy a texture — use `renderer->deferDelete()` or a callback
 
 **DO:**
 - Use `Material` for descriptor management (auto-sizes pool, auto-manages per-frame sets)
 - Use `SimpleRenderer` for the frame lifecycle — it wraps all synchronization
 - Use `renderer->deferDelete()` when replacing textures/buffers mid-frame
 - Use `DescriptorPool::fromLayout()` when you need manual descriptor control
+- Use `fromLayout().allowFree()` when descriptors are allocated/freed dynamically
 - Match pipeline `samples()` to `renderer->msaaSamples()`
+- Share `renderer->renderPass()` across multiple rendering systems (world, overlay, GUI)
 
 ## Setup Chain
 
@@ -352,11 +356,12 @@ DescriptorPool::create(device)
     .maxSets(uint32_t) .poolSize(VkDescriptorType, count) .allowFree(bool)
     .build() -> DescriptorPoolPtr
 DescriptorPool::fromLayout(layout, maxSets)   // Auto-sizes pool from layout
+    .allowFree()                               // Optional: enable individual set freeing
     .build() -> DescriptorPoolPtr
 handle() -> VkDescriptorPool
 allocate(layout) -> VkDescriptorSet
 allocate(layout, count) -> vector<VkDescriptorSet>
-free(VkDescriptorSet) | reset()
+free(VkDescriptorSet) | reset()               // free() requires allowFree()
 
 // Writer
 DescriptorWriter(device)
@@ -394,11 +399,12 @@ framebuffer(index) -> Framebuffer*
 extent() -> VkExtent2D | colorFormat() -> VkFormat | depthFormat() -> VkFormat
 msaaSamples() -> VkSampleCountFlagBits | hasDepth() -> bool
 begin(cmd, clearColor, clearDepth?) | end(cmd)  // Auto-resizes window targets
-recreate()
+recreate(DeletionQueue* dq?)  // dq != nullptr: frame-safe deferred cleanup
 
 // MSAA: enableDepth() validates format via DeviceCapabilities::selectDepthFormat().
 // msaa() creates MSAA color image + resolve attachment automatically.
 // Window targets auto-resize in begin() — no manual recreate needed.
+// recreate() with DeletionQueue defers old framebuffers/images (render pass preserved).
 ```
 
 ### Sync
@@ -431,9 +437,66 @@ DeletionQueue(framesInFlight)
 // Header: finevk/rendering/deletion_queue.hpp
 ```
 
+### RenderSurface (Abstract Interface)
+
+```cpp
+// Common interface for anything renderable (swap chain or off-screen).
+// SimpleRenderer and OffscreenSurface both implement this.
+// Accept RenderSurface* when code should work with either.
+
+// Property accessors (all virtual, default implementations delegate to renderTarget())
+device() -> LogicalDevice*
+renderTarget() -> RenderTarget*
+renderPass() -> RenderPass*
+commandPool() -> CommandPool*
+extent() -> VkExtent2D
+colorFormat() -> VkFormat | depthFormat() -> VkFormat
+msaaSamples() -> VkSampleCountFlagBits | isMsaaEnabled() -> bool
+framesInFlight() -> uint32_t | currentFrame() -> uint32_t
+
+// Deferred deletion (GPU-safe)
+deferDelete(std::function<void()>)
+deferDelete(unique_ptr<T>)
+deferDelete(shared_ptr<T>)
+
+// Header: finevk/rendering/render_surface.hpp
+```
+
+### OffscreenSurface
+
+```cpp
+// Renders to a GPU image that can be sampled as a texture.
+// Implements RenderSurface. Single-buffered with fence sync.
+
+OffscreenSurface::create(device)
+    .extent(width, height)
+    .colorFormat(VK_FORMAT_R8G8B8A8_SRGB)  // default
+    .enableDepth()
+    .msaa(VkSampleCountFlagBits)
+    .build() -> OffscreenSurfacePtr
+
+// Frame lifecycle (single-buffered: wait → record → submit)
+beginFrame()       // Waits for previous render, drains DeletionQueue
+beginRenderPass(ClearColor, clearDepth?)
+endRenderPass()
+endFrame()         // Submits command buffer with fence
+
+// Result access
+colorImage() -> Image*          // The rendered image
+colorImageView() -> ImageView*  // For descriptor set binding
+currentCommandBuffer() -> CommandBuffer*
+
+// Resize
+resize(width, height)  // Waits idle, recreates resources
+
+// Header: finevk/rendering/offscreen_surface.hpp
+```
+
 ## High-Level
 
 ### SimpleRenderer
+
+Implements `RenderSurface`. Delegates render pass/framebuffers/MSAA/depth to `RenderTarget` internally.
 
 ```cpp
 enum class MSAALevel { Off=1, Low=2, Medium=4, High=8, Ultra=16 };
@@ -448,8 +511,15 @@ beginRenderPass(clearColor)
 endRenderPass()
 waitIdle()
 
-// Frame info
-currentFrame() -> uint32_t        // 0 to framesInFlight-1
+// RenderSurface interface (also works via RenderSurface*)
+device() -> LogicalDevice*
+renderTarget() -> RenderTarget*           // Underlying render target
+renderPass() -> RenderPass*
+commandPool() -> CommandPool*
+extent() -> VkExtent2D
+colorFormat() -> VkFormat | depthFormat() -> VkFormat
+msaaSamples() -> VkSampleCountFlagBits
+currentFrame() -> uint32_t                // 0 to framesInFlight-1
 framesInFlight() -> uint32_t
 
 // Deferred deletion (GPU-safe resource cleanup)
@@ -458,19 +528,20 @@ deferDelete(unique_ptr<T>)
 deferDelete(shared_ptr<T>)
 deletionQueue() -> DeletionQueue*  // Direct access (advanced)
 
-// Accessors
-window() -> Window* | device() -> LogicalDevice* | swapChain() -> SwapChain*
-renderPass() -> RenderPass* | commandPool() -> CommandPool*
-defaultSampler() -> Sampler* | extent() -> VkExtent2D
-colorFormat() -> VkFormat | depthFormat() -> VkFormat
-msaaSamples() -> VkSampleCountFlagBits
+// Additional accessors
+window() -> Window* | swapChain() -> SwapChain*
+defaultSampler() -> Sampler*
 
 struct FrameBeginResult {
     bool success, resized;
     uint32_t imageIndex;
+    VkExtent2D extent;
     CommandBuffer* commandBuffer;
     operator bool()            // if (auto frame = renderer->beginFrame())
     operator CommandBuffer&()  // Pass directly to draw methods
+    beginRenderPass(clearColor)  // Convenience (delegates to renderer)
+    endRenderPass()              // Convenience (delegates to renderer)
+    frameIndex() -> uint32_t     // Frame slot index
 };
 ```
 
@@ -480,26 +551,33 @@ struct FrameBeginResult {
 // Automates descriptor layout, pool, sets, and per-frame uniform buffers.
 // Prefer this over manual DescriptorSetLayout + DescriptorPool + DescriptorWriter.
 
+// Auto frame tracking (recommended) — no setFrameIndex() needed:
+Material::create(RenderSurface*)   // e.g. Material::create(*renderer)
+Material::create(RenderSurface&)
+
+// Manual frame tracking (legacy):
 Material::create(device, framesInFlight?)  // 0 = auto from device
+
+// Builder (same for both):
     .uniform<T>(binding, VkShaderStageFlags)
     .texture(binding, VkShaderStageFlags)
     .build() -> MaterialPtr
 
 layout() -> DescriptorSetLayout*
-descriptorSet(frameIndex?) -> VkDescriptorSet  // No arg = current frame
-setFrameIndex(uint32_t)
+descriptorSet(frameIndex?) -> VkDescriptorSet  // No arg = auto or manual current frame
+setFrameIndex(uint32_t)                        // Only needed in manual mode
+surface() -> RenderSurface*                    // nullptr if created from device
 update<T>(binding, data)                       // Updates current frame's uniform
 setTexture(binding, texture, sampler)          // Applies to all frames
 bind(cmd, VkPipelineLayout, setIndex?)         // Binds current frame's set
 
-// Usage:
-auto mat = Material::create(device)
+// Recommended: auto frame tracking
+auto mat = Material::create(*renderer)
     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
     .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)
     .build();
 mat->setTexture(1, texture, renderer->defaultSampler());
-// Per-frame:
-mat->setFrameIndex(renderer->currentFrame());
+// Per-frame (no setFrameIndex needed!):
 mat->update<MVPUniform>(0, mvpData);
 mat->bind(cmd, pipelineLayout->handle());
 ```
@@ -883,3 +961,71 @@ renderer->deferDelete(sharedResource);  // Releases reference
 ```
 
 **How it works**: Each frame slot has its own queue. `beginFrame()` waits on the frame fence (proving GPU done), then drains that slot. After `framesInFlight` frames, resources are safely destroyed.
+
+## Render-Pass Sharing
+
+Multiple systems can render into SimpleRenderer's single render pass. Each system creates its own pipeline (matching the render pass format and MSAA) and records draw commands between `beginRenderPass()` and `endRenderPass()`. Draw order determines visual layering (later draws on top).
+
+```cpp
+// Setup: each system creates its own pipeline using renderer's render pass
+auto worldPipeline = GraphicsPipeline::create(device, renderer->renderPass(), worldLayout)
+    .samples(renderer->msaaSamples()).enableDepth().build();
+auto overlayPipeline = GraphicsPipeline::create(device, renderer->renderPass(), overlayLayout)
+    .samples(renderer->msaaSamples()).build();
+// Third-party systems (e.g., GUI) also initialize with renderer's render pass
+
+// Render loop
+if (auto frame = renderer->beginFrame()) {
+    renderer->beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
+
+    worldRenderer.render(frame);    // 3D scene (depth-tested)
+    overlay->render(frame);         // 2D overlay (crosshair, HUD)
+    guiSystem.render(frame);        // ImGui (rendered last = on top)
+
+    renderer->endRenderPass();
+    renderer->endFrame();
+}
+```
+
+**Key points:**
+- All pipelines must use `renderer->msaaSamples()` to match the render pass
+- All pipelines must use `renderer->renderPass()` (or a compatible one)
+- Systems that need `CommandBuffer&` can accept `FrameBeginResult` directly (implicit conversion)
+- Systems needing frame index use `renderer->currentFrame()`
+- Each system manages its own pipeline, descriptors, and vertex/index buffers
+- Systems can accept `RenderSurface*` instead of `SimpleRenderer*` to work with both swap chain and off-screen rendering
+
+## Deferred Deletion Callback Pattern
+
+External systems (libraries, plugins) that need GPU-safe resource cleanup can accept a deletion callback instead of coupling to SimpleRenderer directly:
+
+```cpp
+// External system accepts a generic callback
+using DeferDeleteFn = std::function<void(std::function<void()>)>;
+
+class ExternalRenderer {
+public:
+    void initialize(RenderPass* rp, CommandPool* cp, DeferDeleteFn deferDelete) {
+        deferDelete_ = std::move(deferDelete);
+    }
+
+    void replaceTexture(TextureRef newTex) {
+        if (deferDelete_) {
+            deferDelete_([old = std::move(texture_)]() mutable { old.reset(); });
+        }
+        texture_ = std::move(newTex);
+    }
+private:
+    DeferDeleteFn deferDelete_;
+    TextureRef texture_;
+};
+
+// Caller wires it up via SimpleRenderer (or any RenderSurface)
+externalRenderer.initialize(
+    renderer->renderPass(),
+    renderer->commandPool(),
+    [&renderer](std::function<void()> fn) { renderer->deferDelete(std::move(fn)); }
+);
+```
+
+This avoids `device->waitIdle()` in the external system's render path while keeping it decoupled from SimpleRenderer.

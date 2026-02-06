@@ -1,5 +1,6 @@
 #include "finevk/high/material.hpp"
 #include "finevk/rendering/descriptors.hpp"
+#include "finevk/rendering/render_surface.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/command.hpp"
 #include "finevk/device/buffer.hpp"
@@ -40,6 +41,7 @@ MaterialPtr Material::Builder::build() {
 
     auto material = MaterialPtr(new Material());
     material->device_ = device_;
+    material->surface_ = surface_;
     material->framesInFlight_ = frames;
 
     // Create descriptor set layout
@@ -108,12 +110,23 @@ Material::Builder Material::create(LogicalDevice* device, uint32_t framesInFligh
     return Builder(device, framesInFlight);
 }
 
+Material::Builder Material::create(RenderSurface* surface) {
+    Builder builder(surface->device(), surface->framesInFlight());
+    builder.surface_ = surface;
+    return builder;
+}
+
+uint32_t Material::activeFrame() const {
+    return surface_ ? surface_->currentFrame() : currentFrame_;
+}
+
 Material::~Material() {
     cleanup();
 }
 
 Material::Material(Material&& other) noexcept
     : device_(other.device_)
+    , surface_(other.surface_)
     , framesInFlight_(other.framesInFlight_)
     , currentFrame_(other.currentFrame_)
     , layout_(std::move(other.layout_))
@@ -121,6 +134,7 @@ Material::Material(Material&& other) noexcept
     , descriptorSets_(std::move(other.descriptorSets_))
     , uniformBuffers_(std::move(other.uniformBuffers_)) {
     other.device_ = nullptr;
+    other.surface_ = nullptr;
     other.framesInFlight_ = 0;
     other.currentFrame_ = 0;
 }
@@ -129,6 +143,7 @@ Material& Material::operator=(Material&& other) noexcept {
     if (this != &other) {
         cleanup();
         device_ = other.device_;
+        surface_ = other.surface_;
         framesInFlight_ = other.framesInFlight_;
         currentFrame_ = other.currentFrame_;
         layout_ = std::move(other.layout_);
@@ -136,6 +151,7 @@ Material& Material::operator=(Material&& other) noexcept {
         descriptorSets_ = std::move(other.descriptorSets_);
         uniformBuffers_ = std::move(other.uniformBuffers_);
         other.device_ = nullptr;
+        other.surface_ = nullptr;
         other.framesInFlight_ = 0;
         other.currentFrame_ = 0;
     }
@@ -157,7 +173,7 @@ VkDescriptorSet Material::descriptorSet(uint32_t frameIndex) const {
 }
 
 VkDescriptorSet Material::descriptorSet() const {
-    return descriptorSet(currentFrame_);
+    return descriptorSet(activeFrame());
 }
 
 void Material::setTexture(uint32_t binding, Texture* texture, Sampler* sampler) {

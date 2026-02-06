@@ -2,17 +2,12 @@
  * @file main.cpp
  * @brief Viking Room example - demonstrates MSAA with textured 3D model
  *
- * This example demonstrates the current state of FineStructure's high-level API:
+ * This example demonstrates FineStructure's high-level API:
  * - Window API for platform abstraction
  * - SimpleRenderer with MSAA enabled
- * - OBJ model loading
- * - Texture loading with mipmaps
- * - Uniform buffers for MVP matrices
- *
- * NOTE: This example still requires explicit descriptor/pipeline setup.
- * Future improvements (tracked in design doc):
  * - Material class for automatic descriptor management
- * - Pipeline creation from SimpleRenderer
+ * - Modern builder APIs for mesh and texture loading
+ * - FrameBeginResult convenience methods
  */
 
 #include <finevk/finevk.hpp>
@@ -38,7 +33,7 @@ int main() {
             .enableValidation(true)
             .build();
 
-        // Create window using Window API (replaces manual GLFW setup)
+        // Create window
         auto window = Window::create(instance)
             .title("Viking Room - MSAA Demo")
             .size(1280, 720)
@@ -73,72 +68,35 @@ int main() {
         std::cout << "Renderer created with " << static_cast<int>(renderer->msaaSamples())
                   << "x MSAA\n";
 
-        // Load model
-        auto mesh = Mesh::fromOBJ(
-            renderer->device(),
-            "assets/viking_room.obj",
-            renderer->commandPool(),
-            VertexAttribute::Position | VertexAttribute::Normal | VertexAttribute::TexCoord);
+        // Load model using modern builder API
+        auto mesh = Mesh::load(renderer->device(), renderer->commandPool(), "assets/viking_room.obj")
+            .attributes(VertexAttribute::Position | VertexAttribute::Normal | VertexAttribute::TexCoord)
+            .build();
 
         std::cout << "Model loaded: " << mesh->indexCount() << " indices\n";
 
-        // Load texture
-        auto texture = Texture::fromFile(
-            renderer->device(),
-            "assets/viking_room.png",
-            renderer->commandPool(),
-            true,   // Generate mipmaps
-            true);  // sRGB
+        // Load texture using modern builder API
+        auto texture = Texture::load(renderer->device(), renderer->commandPool(), "assets/viking_room.png")
+            .generateMipmaps()
+            .srgb()
+            .build();
 
         std::cout << "Texture loaded: " << texture->width() << "x" << texture->height()
                   << ", " << texture->mipLevels() << " mip levels\n";
 
-        // Create uniform buffers
-        auto uniformBuffer = UniformBuffer<MVPUniform>::create(
-            renderer->device(),
-            renderer->framesInFlight());
-
-        // Create descriptor set layout
-        auto descriptorLayout = DescriptorSetLayout::create(renderer->device())
-            .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
-            .combinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
+        // Create material with auto frame tracking
+        auto material = Material::create(*renderer)
+            .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
+            .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)
             .build();
 
-        // Create descriptor pool
-        auto descriptorPool = DescriptorPool::create(renderer->device())
-            .maxSets(renderer->framesInFlight())
-            .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, renderer->framesInFlight())
-            .poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, renderer->framesInFlight())
-            .build();
+        // Set texture once
+        material->setTexture(1, texture.get(), renderer->defaultSampler());
 
-        // Allocate descriptor sets
-        auto descriptorSets = descriptorPool->allocate(
-            descriptorLayout,
-            renderer->framesInFlight());
-
-        // Write descriptor sets
-        DescriptorWriter writer(renderer->device());
-        for (uint32_t i = 0; i < renderer->framesInFlight(); i++) {
-            writer.writeBuffer(
-                descriptorSets[i], 0,
-                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                *uniformBuffer->buffer(i));
-
-            writer.writeImage(
-                descriptorSets[i], 1,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                texture->view(),
-                renderer->defaultSampler());
-        }
-        writer.update();
-
-        // Create pipeline layout (need this before DescriptorBinding)
+        // Create pipeline layout from material's descriptor layout
         auto pipelineLayout = PipelineLayout::create(renderer->device())
-            .addDescriptorSetLayout(descriptorLayout->handle())
+            .addDescriptorSetLayout(material->layout()->handle())
             .build();
-
-        // Create descriptor binding for automatic frame selection
-        DescriptorBinding descriptors(*renderer, *pipelineLayout, descriptorSets);
 
         // Load shaders
         auto vertShader = ShaderModule::fromFile(renderer->device(), "shaders/model.vert.spv");
@@ -183,13 +141,12 @@ int main() {
             }
         });
 
-        // Main loop using Window API
+        // Main loop
         while (window->isOpen()) {
             window->pollEvents();
 
-            // Begin frame - frame converts to CommandBuffer& implicitly
             if (auto frame = renderer->beginFrame()) {
-                // Update MVP
+                // Update MVP uniform via material (auto frame tracking)
                 auto currentTime = std::chrono::high_resolution_clock::now();
                 float time = std::chrono::duration<float>(currentTime - startTime).count();
 
@@ -200,24 +157,23 @@ int main() {
                     glm::vec3(0.0f, 0.0f, 0.0f),
                     glm::vec3(0.0f, 0.0f, 1.0f));
 
-                auto extent = renderer->extent();
-                float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+                float aspect = static_cast<float>(frame.extent.width) / static_cast<float>(frame.extent.height);
                 mvp.projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
                 mvp.projection[1][1] *= -1;  // Flip Y for Vulkan
 
-                uniformBuffer->update(renderer->currentFrame(), mvp);
+                material->update<MVPUniform>(0, mvp);
 
-                // Render - pass frame directly to methods expecting CommandBuffer&
-                renderer->beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
+                // Render using FrameBeginResult convenience methods
+                frame.beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
 
-                CommandBuffer& cmd = frame;  // Implicit conversion
+                CommandBuffer& cmd = frame;
                 cmd.bindPipeline(pipeline);
-                descriptors.bind(cmd);
+                material->bind(cmd, pipelineLayout->handle());
 
                 mesh->bind(cmd);
                 mesh->draw(cmd);
 
-                renderer->endRenderPass();
+                frame.endRenderPass();
                 renderer->endFrame();
             }
         }

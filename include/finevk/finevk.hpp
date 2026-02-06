@@ -31,6 +31,8 @@
 #include "finevk/rendering/sync.hpp"
 #include "finevk/rendering/descriptors.hpp"
 #include "finevk/rendering/render_target.hpp"
+#include "finevk/rendering/render_surface.hpp"
+#include "finevk/rendering/offscreen_surface.hpp"
 
 // High-Level Abstractions (Layer 4)
 #include "finevk/high/texture.hpp"

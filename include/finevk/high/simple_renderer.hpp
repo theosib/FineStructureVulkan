@@ -4,6 +4,7 @@
 #include "finevk/window/window.hpp"
 #include "finevk/high/mesh.hpp"
 #include "finevk/high/uniform_buffer.hpp"
+#include "finevk/rendering/render_surface.hpp"
 #include "finevk/rendering/deletion_queue.hpp"
 
 #include <vulkan/vulkan.h>
@@ -24,11 +25,11 @@ class RenderPass;
 class GraphicsPipeline;
 class CommandPool;
 class CommandBuffer;
-class SwapChainFramebuffers;
 class DescriptorSetLayout;
 class DescriptorPool;
 class Sampler;
 class Texture;
+class SimpleRenderer;
 
 /**
  * @brief MSAA quality level for easy configuration
@@ -58,8 +59,10 @@ struct RendererConfig {
  * Can be used directly in if-statements and passed to methods expecting CommandBuffer&:
  * @code
  * if (auto frame = renderer->beginFrame()) {
- *     overlay->render(frame);  // Implicit conversion to CommandBuffer&
+ *     frame.beginRenderPass({0.1f, 0.1f, 0.15f, 1.0f});
  *     mesh->draw(frame);
+ *     frame.endRenderPass();
+ *     renderer->endFrame();
  * }
  * @endcode
  */
@@ -67,6 +70,7 @@ struct FrameBeginResult {
     bool success = false;
     bool resized = false;
     uint32_t imageIndex = 0;
+    VkExtent2D extent{};
     CommandBuffer* commandBuffer = nullptr;
 
     /// Check if frame begin succeeded (for use in if-statements)
@@ -74,6 +78,20 @@ struct FrameBeginResult {
 
     /// Implicit conversion to CommandBuffer& for convenient passing to render methods
     operator CommandBuffer&() const { return *commandBuffer; }
+
+    /// Convenience: begin render pass with clear color
+    void beginRenderPass(const glm::vec4& clearColor = {0.0f, 0.0f, 0.0f, 1.0f});
+
+    /// Convenience: end render pass
+    void endRenderPass();
+
+    /// Get frame slot index (0 to framesInFlight-1)
+    uint32_t frameIndex() const { return frameIndex_; }
+
+private:
+    friend class SimpleRenderer;
+    SimpleRenderer* renderer_ = nullptr;
+    uint32_t frameIndex_ = 0;
 };
 
 /**
@@ -81,9 +99,11 @@ struct FrameBeginResult {
  *
  * SimpleRenderer provides a simplified interface for common rendering tasks,
  * managing render pass, framebuffers, and frame lifecycle. It uses Window
- * internally for swap chain and synchronization management.
+ * internally for swap chain and synchronization management, and delegates
+ * render pass/framebuffer/depth/MSAA management to RenderTarget.
  *
- * For more complex scenarios, use the lower-level components directly.
+ * Implements the RenderSurface interface, allowing code that works with
+ * either swap chain or off-screen rendering to accept a RenderSurface*.
  *
  * Usage:
  * @code
@@ -92,21 +112,20 @@ struct FrameBeginResult {
  * auto device = physicalDevice.createLogicalDevice().surface(window->surface()).build();
  * window->bindDevice(device);
  *
- * auto renderer = SimpleRenderer::create(window, device);
+ * auto renderer = SimpleRenderer::create(window);
  *
  * while (window->isOpen()) {
  *     window->pollEvents();
- *     auto result = renderer->beginFrame();
- *     if (result.success) {
- *         renderer->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
+ *     if (auto frame = renderer->beginFrame()) {
+ *         frame.beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
  *         // Draw...
- *         renderer->endRenderPass();
+ *         frame.endRenderPass();
  *         renderer->endFrame();
  *     }
  * }
  * @endcode
  */
-class SimpleRenderer {
+class SimpleRenderer : public RenderSurface {
 public:
     /**
      * @brief Create a simple renderer using a Window
@@ -126,38 +145,41 @@ public:
     /// Get the window
     Window* window() const { return window_; }
 
-    /// Get the logical device
-    LogicalDevice* device() const;
+    // =========================================================================
+    // RenderSurface interface
+    // =========================================================================
+
+    LogicalDevice* device() const override;
+    RenderTarget* renderTarget() const override { return renderTarget_.get(); }
+    RenderPass* renderPass() const override;
+    CommandPool* commandPool() const override { return commandPool_; }
+    VkExtent2D extent() const override;
+    VkFormat colorFormat() const override;
+    VkFormat depthFormat() const override;
+    VkSampleCountFlagBits msaaSamples() const override;
+    uint32_t framesInFlight() const override;
+    uint32_t currentFrame() const override;
+    void deferDelete(std::function<void()> deleter) override;
+
+    // Template overloads (hide base class — same implementation)
+    template<typename T>
+    void deferDelete(std::unique_ptr<T> resource) {
+        if (deletionQueue_) deletionQueue_->push(std::move(resource));
+    }
+    template<typename T>
+    void deferDelete(std::shared_ptr<T> resource) {
+        if (deletionQueue_) deletionQueue_->push(std::move(resource));
+    }
 
     /// Get the swap chain (from window)
     SwapChain* swapChain() const;
 
-    /// Get the render pass
-    RenderPass* renderPass() const { return renderPass_.get(); }
+    /// Access the frame deletion queue directly (for advanced use)
+    DeletionQueue* deletionQueue() { return deletionQueue_.get(); }
 
-    /// Get the command pool (device's default pool)
-    CommandPool* commandPool() const { return commandPool_; }
-
-    /// Get frames in flight count
-    uint32_t framesInFlight() const;
-
-    /// Get current frame index (0 to framesInFlight-1)
-    uint32_t currentFrame() const;
-
-    /// Get swap chain extent
-    VkExtent2D extent() const;
-
-    /// Get swap chain image format
-    VkFormat colorFormat() const;
-
-    /// Get depth format (VK_FORMAT_UNDEFINED if no depth)
-    VkFormat depthFormat() const { return depthFormat_; }
-
-    /// Get actual MSAA sample count being used
-    VkSampleCountFlagBits msaaSamples() const { return msaaSamples_; }
-
-    /// Check if MSAA is enabled
-    bool isMsaaEnabled() const { return msaaSamples_ != VK_SAMPLE_COUNT_1_BIT; }
+    // =========================================================================
+    // Frame Lifecycle
+    // =========================================================================
 
     /**
      * @brief Begin a new frame
@@ -210,47 +232,6 @@ public:
     void waitIdle();
 
     // =========================================================================
-    // Deferred Deletion
-    // =========================================================================
-
-    /**
-     * @brief Queue a resource for GPU-safe deferred deletion
-     *
-     * The resource will be destroyed after the current frame's work completes
-     * on the GPU (specifically, when this frame slot is next reused after
-     * framesInFlight frames). This is safe for any resource referenced by
-     * the current frame's command buffers.
-     *
-     * @param deleter Function that destroys the resource
-     */
-    void deferDelete(std::function<void()> deleter);
-
-    /**
-     * @brief Queue a unique_ptr for GPU-safe deferred deletion
-     *
-     * @code
-     * auto oldTexture = std::move(myTexture_);
-     * myTexture_ = loadNewTexture();
-     * renderer->deferDelete(std::move(oldTexture));
-     * @endcode
-     */
-    template<typename T>
-    void deferDelete(std::unique_ptr<T> resource) {
-        if (deletionQueue_) deletionQueue_->push(std::move(resource));
-    }
-
-    /**
-     * @brief Queue a shared_ptr for GPU-safe deferred reference release
-     */
-    template<typename T>
-    void deferDelete(std::shared_ptr<T> resource) {
-        if (deletionQueue_) deletionQueue_->push(std::move(resource));
-    }
-
-    /// Access the frame deletion queue directly (for advanced use)
-    DeletionQueue* deletionQueue() { return deletionQueue_.get(); }
-
-    // =========================================================================
     // Utilities
     // =========================================================================
 
@@ -275,33 +256,17 @@ public:
 private:
     SimpleRenderer() = default;
 
-    void createRenderPass();
-    void createColorResources();
-    void createDepthResources();
-    void createFramebuffers();
     void recreateResources();
-    void cleanupResources();
 
     // Configuration
     RendererConfig config_;
     Window* window_ = nullptr;  // Non-owning reference to Window
 
-    // Core objects owned by SimpleRenderer
-    RenderPassPtr renderPass_;
-    std::unique_ptr<SwapChainFramebuffers> framebuffers_;
+    // Rendering infrastructure (delegates to RenderTarget)
+    RenderTargetPtr renderTarget_;
 
     // Non-owning reference to device's default command pool
     CommandPool* commandPool_ = nullptr;
-
-    // MSAA
-    VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
-    ImagePtr colorImage_;      // MSAA color buffer (resolve target is swap chain)
-    ImageViewPtr colorView_;
-
-    // Depth buffer
-    VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
-    ImagePtr depthImage_;
-    ImageViewPtr depthView_;
 
     // Frame state
     uint32_t currentImageIndex_ = 0;

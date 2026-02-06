@@ -11,12 +11,12 @@ This document tracks API improvements identified during the tutorial-style code 
 
 The FineStructure API is well-designed with consistent patterns (builder pattern, smart pointers, overloads for different pointer types). The main opportunities for improvement are:
 
-1. **RenderSurface/FrameContext architecture** - Unified abstraction for swap chain and off-screen rendering with automatic frame tracking. Get a frame, render 3D and 2D to it, submit. No manual frame index management.
-2. **Hide Vulkan complexity** via RenderTarget abstraction (unify RenderPass/Framebuffer/Image)
-3. **Hide frame indexing** from developers (Material class manages per-frame resources internally)
-4. **Builder-first for loading** (Texture, Mesh) to avoid boolean argument confusion
-5. **Auto-create common resources** (Image default views, matching depth buffers)
-6. **Infer settings** where possible (MSAA from RenderTarget, depthTest from compareOp)
+1. ~~**RenderSurface/FrameContext architecture**~~ ✅ Unified abstraction for swap chain and off-screen rendering with automatic frame tracking. SimpleRenderer inherits RenderSurface, OffscreenSurface for render-to-texture, Material auto frame tracking.
+2. ~~**Hide Vulkan complexity**~~ ✅ RenderTarget abstraction (unify RenderPass/Framebuffer/Image)
+3. ~~**Hide frame indexing**~~ ✅ Material class manages per-frame resources internally via RenderSurface
+4. ~~**Builder-first for loading**~~ ✅ Texture::load(), Mesh::load() builders avoid boolean confusion
+5. ~~**Auto-create common resources**~~ ✅ Image default views, matching depth buffers
+6. **Infer settings** where possible (MSAA from RenderTarget, depthTest from compareOp) — partially done
 
 ### Components Reviewed
 - Instance, Window, Surface ✓
@@ -43,11 +43,36 @@ The FineStructure API is well-designed with consistent patterns (builder pattern
 
 ---
 
-## RenderSurface and FrameContext Architecture (P1 - MAJOR)
+## RenderSurface and FrameContext Architecture (P1 - MAJOR) ✅ IMPLEMENTED
+
+**Status**: ✅ **COMPLETED** — RenderSurface interface, OffscreenSurface, enhanced FrameBeginResult, and Material auto frame tracking are all implemented.
 
 **Problem**: Frame index management is explicit and leaks to user code. The current architecture is tied to swap chains, but off-screen rendering also needs per-frame resource management. Additionally, 3D and 2D rendering should work smoothly together without the user managing frame indices.
 
 **Vision**: A unified abstraction where you "get a frame" from any render surface (swap chain or off-screen), render 3D and 2D content to it, and submit - without thinking about frame indices.
+
+### Actual Implementation
+
+The final implementation differs from the initial proposal in some design choices:
+
+1. **RenderSurface** is an abstract interface (not FrameContext-returning) — it exposes `device()`, `renderTarget()`, `renderPass()`, `extent()`, `colorFormat()`, `depthFormat()`, `msaaSamples()`, `framesInFlight()`, `currentFrame()`, `deferDelete()`.
+2. **`beginFrame()`/`endFrame()` are NOT on the interface** — semantics differ too much between swap chain and off-screen. They remain on concrete classes.
+3. **SimpleRenderer** inherits RenderSurface, delegating all rendering infrastructure to RenderTarget.
+4. **OffscreenSurface** inherits RenderSurface, provides single-buffered render-to-texture.
+5. **FrameBeginResult** gained `beginRenderPass()`, `endRenderPass()`, `extent`, `frameIndex()`.
+6. **Material** gains `create(RenderSurface&)` for auto frame tracking — no manual `setFrameIndex()` needed.
+7. **FrameContext** was NOT created as a separate class — FrameBeginResult serves this role.
+8. **PerFrameResource<T>** was NOT implemented — Material handles its own per-frame resources.
+
+**Files created/modified**:
+- `include/finevk/rendering/render_surface.hpp` — Abstract interface
+- `include/finevk/rendering/offscreen_surface.hpp` — Off-screen render-to-texture
+- `src/rendering/offscreen_surface.cpp` — Implementation
+- `include/finevk/high/simple_renderer.hpp` — Inherits RenderSurface
+- `src/high/simple_renderer.cpp` — Delegates to RenderTarget (~100 lines removed)
+- `include/finevk/high/material.hpp` — `create(RenderSurface*)` factory
+- `src/high/material.cpp` — Auto frame tracking via `activeFrame()`
+- `examples/viking_room/main.cpp` — Updated to use Material + modern APIs
 
 ### Existing Infrastructure Analysis
 
@@ -630,37 +655,33 @@ auto framebuffers = SwapChainFramebuffers::create(swapChain, renderPass);
 
 ---
 
-## Material Class (P1)
+## Material Class (P1) ✅ IMPLEMENTED
+
+**Status**: ✅ **COMPLETED** — Material class with auto frame tracking via RenderSurface.
 
 **Problem**: Descriptor setup is verbose and requires understanding internals.
 
-**Solution**: Material class that encapsulates:
-- Descriptor set layout
-- Descriptor pool
-- Descriptor sets (per-frame)
-- Uniform buffers
-- Texture bindings
-- Pipeline integration
+**Solution**: Material class that encapsulates descriptor set layout, pool, per-frame descriptor sets, uniform buffers, and texture bindings.
 
 ```cpp
-auto material = Material::create(device)  // Auto-discovers framesInFlight
+// With auto frame tracking (recommended)
+auto material = Material::create(*renderer)  // RenderSurface&
     .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
     .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)
     .build();
 
-// Bind texture once
 material->setTexture(1, texture, sampler);
+material->update<MVPUniform>(0, mvpData);  // Auto frame selection
+material->bind(cmd, pipelineLayout->handle());  // Auto frame selection
 
-// Per-frame update (frame selection is automatic)
-material->update<MVPUniform>(0, mvpData);
-
-// Bind for current frame (frame selection is automatic)
-material->bind(cmd);
+// Or with explicit device (manual frame tracking)
+auto material = Material::create(device)
+    .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)
+    .build();
+material->setFrameIndex(renderer->currentFrame());  // Manual
 ```
 
-**Key insight**: Material should NOT expose frame indices. It should query the current frame from Window/RenderTarget.
-
-**Files to create**:
+**Files**:
 - `include/finevk/high/material.hpp`
 - `src/high/material.cpp`
 
@@ -814,25 +835,24 @@ Confirmed: `instance->createWindow(title, width, height)` already exists for sim
 1. ✓ RenderTarget abstraction
 2. ✓ Image auto-creates default view
 3. ✓ GraphicsPipeline accepts RenderTarget
-4. ✓ Material class
+4. ✓ Material class (with auto frame tracking via RenderSurface)
 5. ✓ Pipeline convenience methods (enableDepth, alphaBlending)
+6. ✓ RenderSurface architecture (SimpleRenderer inherits, OffscreenSurface, FrameBeginResult enhanced)
 
 ### P2 - Completed ✓
-6. ✓ Depth buffer factory on Image
-7. ✓ SwapChainFramebuffers builder pattern
-8. ✓ DescriptorPool::fromLayout
-9. ✓ Texture builder-first API (avoid boolean args)
-10. ✓ Device default command pool
-
-### P2 - Completed (Additional)
-11. ✓ CommandBuffer::beginRenderPass simplification (accept RenderTarget)
-12. ✓ Mesh builder-first for loading (same pattern as Texture)
+7. ✓ Depth buffer factory on Image
+8. ✓ SwapChainFramebuffers builder pattern
+9. ✓ DescriptorPool::fromLayout
+10. ✓ Texture builder-first API (avoid boolean args)
+11. ✓ Device default command pool
+12. ✓ CommandBuffer::beginRenderPass simplification (accept RenderTarget)
+13. ✓ Mesh builder-first for loading (same pattern as Texture)
 
 ### P2 - Remaining
-13. Pipeline vertexFormat() convenience method (low priority)
+14. Pipeline vertexFormat() convenience method (low priority)
 
 ### P3 - Future
-14. Shader reflection for auto-detection
+15. Shader reflection for auto-detection
 
 ---
 

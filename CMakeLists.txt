@@ -108,6 +108,7 @@ set(FINEVK_CORE_SOURCES
     src/rendering/descriptors.cpp
     src/rendering/render_target.cpp
     src/rendering/deletion_queue.cpp
+    src/rendering/offscreen_surface.cpp
 
     # Layer 4: High-Level Abstractions
     src/high/texture.cpp
@@ -147,6 +148,8 @@ set(FINEVK_CORE_HEADERS
     include/finevk/rendering/sync.hpp
     include/finevk/rendering/descriptors.hpp
     include/finevk/rendering/render_target.hpp
+    include/finevk/rendering/render_surface.hpp
+    include/finevk/rendering/offscreen_surface.hpp
     include/finevk/rendering/deletion_queue.hpp
     include/finevk/high/texture.hpp
     include/finevk/high/mesh.hpp
