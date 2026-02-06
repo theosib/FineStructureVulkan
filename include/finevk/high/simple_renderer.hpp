@@ -281,7 +281,6 @@ private:
     void createFramebuffers();
     void recreateResources();
     void cleanupResources();
-    VkSampleCountFlagBits selectMsaaSamples(MSAALevel level);
 
     // Configuration
     RendererConfig config_;

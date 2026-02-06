@@ -100,7 +100,8 @@ public:
     template<typename T>
     void push(std::unique_ptr<T> resource) {
         if (resource) {
-            push([r = std::move(resource)]() mutable { r.reset(); });
+            // Convert to shared_ptr so the lambda is copyable (std::function requires it)
+            push(std::shared_ptr<T>(resource.release()));
         }
     }
 

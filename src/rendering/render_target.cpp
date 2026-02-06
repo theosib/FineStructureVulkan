@@ -2,6 +2,7 @@
 #include "finevk/rendering/renderpass.hpp"
 #include "finevk/rendering/framebuffer.hpp"
 #include "finevk/device/logical_device.hpp"
+#include "finevk/device/physical_device.hpp"
 #include "finevk/device/image.hpp"
 #include "finevk/device/command.hpp"
 #include "finevk/window/window.hpp"
@@ -39,7 +40,8 @@ RenderTarget::Builder& RenderTarget::Builder::colorAttachment(ImageView* view) {
 
 RenderTarget::Builder& RenderTarget::Builder::enableDepth() {
     enableDepth_ = true;
-    depthFormat_ = VK_FORMAT_D32_SFLOAT;  // Default high-precision depth
+    auto* physDevice = device_->physicalDevice();
+    depthFormat_ = physDevice->capabilities().selectDepthFormat(physDevice->handle());
     return *this;
 }
 
@@ -96,14 +98,12 @@ RenderTargetPtr RenderTarget::Builder::build() {
     }
 
     // Create resources
+    if (target->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        target->createMsaaResources();
+    }
     target->createDepthResources();
     target->createRenderPass();
     target->createFramebuffers();
-
-    // Set up resize callback for window targets
-    if (window_) {
-        target->setupWindowResizeCallback();
-    }
 
     return target;
 }
@@ -140,6 +140,7 @@ RenderTarget::RenderTarget(RenderTarget&& other) noexcept
     , framebuffers_(std::move(other.framebuffers_))
     , depthImage_(std::move(other.depthImage_))
     , msaaColorImage_(std::move(other.msaaColorImage_))
+    , msaaColorView_(std::move(other.msaaColorView_))
     , extent_(other.extent_)
     , colorFormat_(other.colorFormat_)
     , depthFormat_(other.depthFormat_)
@@ -160,6 +161,7 @@ RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept {
         framebuffers_ = std::move(other.framebuffers_);
         depthImage_ = std::move(other.depthImage_);
         msaaColorImage_ = std::move(other.msaaColorImage_);
+        msaaColorView_ = std::move(other.msaaColorView_);
         extent_ = other.extent_;
         colorFormat_ = other.colorFormat_;
         depthFormat_ = other.depthFormat_;
@@ -176,14 +178,13 @@ void RenderTarget::cleanup() {
     // Clear framebuffers first (they reference render pass and images)
     framebuffers_.clear();
 
-    // Clear owned images
-    depthImage_.reset();
+    // Clear owned images and views
+    msaaColorView_.reset();
     msaaColorImage_.reset();
+    depthImage_.reset();
 
     // Clear render pass
     renderPass_.reset();
-
-    // Note: We don't unregister resize callback here because Window handles cleanup
 }
 
 Framebuffer* RenderTarget::currentFramebuffer() const {
@@ -211,6 +212,9 @@ Framebuffer* RenderTarget::framebuffer(size_t index) const {
 }
 
 void RenderTarget::begin(CommandBuffer& cmd, const ClearColor& clearColor, float clearDepth) {
+    // Auto-detect resize for window targets
+    checkResize();
+
     std::vector<VkClearValue> clearValues;
     clearValues.push_back(clearColor.toVkClearValue());
 
@@ -218,6 +222,11 @@ void RenderTarget::begin(CommandBuffer& cmd, const ClearColor& clearColor, float
         VkClearValue depthClear{};
         depthClear.depthStencil = {clearDepth, 0};
         clearValues.push_back(depthClear);
+    }
+
+    // MSAA resolve attachment clear
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        clearValues.push_back(clearColor.toVkClearValue());
     }
 
     Framebuffer* fb = currentFramebuffer();
@@ -254,6 +263,13 @@ void RenderTarget::recreate() {
         extent_ = {colorImage_->width(), colorImage_->height()};
     }
 
+    // Recreate MSAA resources if we own them
+    if (msaaColorImage_) {
+        msaaColorView_.reset();
+        msaaColorImage_.reset();
+        createMsaaResources();
+    }
+
     // Recreate depth resources if we own them
     if (depthImage_) {
         depthImage_.reset();
@@ -264,44 +280,64 @@ void RenderTarget::recreate() {
     framebuffers_.clear();
     createFramebuffers();
 
-    FINEVK_DEBUG(LogCategory::Render, "RenderTarget recreated");
+    FINEVK_DEBUG(LogCategory::Render, "RenderTarget recreated: " +
+        std::to_string(extent_.width) + "x" + std::to_string(extent_.height));
 }
 
 void RenderTarget::createRenderPass() {
-    auto builder = RenderPass::create(device_);
-
-    // Color attachment
     VkImageLayout finalLayout = window_ ?
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR :
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    builder.addColorAttachment(
-        colorFormat_,
-        msaaSamples_,
-        VK_ATTACHMENT_LOAD_OP_CLEAR,
-        VK_ATTACHMENT_STORE_OP_STORE,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        finalLayout);
+    if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
+        // MSAA: multisampled color -> resolve to single-sampled target
+        auto builder = RenderPass::create(device_);
 
-    builder.subpassColorAttachment(0);
+        // Attachment 0: MSAA color (multisampled, don't need to store - will resolve)
+        builder.addColorAttachment(
+            colorFormat_, msaaSamples_,
+            VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        builder.subpassColorAttachment(0);
 
-    // Depth attachment
-    if (hasDepth()) {
-        builder.addDepthAttachment(
-            depthFormat_,
-            msaaSamples_,
-            VK_ATTACHMENT_LOAD_OP_CLEAR,
-            VK_ATTACHMENT_STORE_OP_DONT_CARE);
+        uint32_t nextAttachment = 1;
 
-        builder.subpassDepthAttachment(1);
+        // Attachment 1 (optional): Depth
+        if (hasDepth()) {
+            builder.addDepthAttachment(depthFormat_, msaaSamples_);
+            builder.subpassDepthAttachment(nextAttachment++);
+        }
+
+        // Last attachment: Resolve target (single-sampled)
+        builder.addResolveAttachment(colorFormat_, finalLayout);
+        builder.subpassResolveAttachment(nextAttachment);
+
+        if (window_) {
+            builder.addPresentationDependency();
+        }
+
+        renderPass_ = builder.build();
+    } else {
+        // No MSAA: single-sampled color
+        auto builder = RenderPass::create(device_);
+
+        builder.addColorAttachment(
+            colorFormat_, VK_SAMPLE_COUNT_1_BIT,
+            VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+            VK_IMAGE_LAYOUT_UNDEFINED, finalLayout);
+        builder.subpassColorAttachment(0);
+
+        if (hasDepth()) {
+            builder.addDepthAttachment(depthFormat_, VK_SAMPLE_COUNT_1_BIT);
+            builder.subpassDepthAttachment(1);
+        }
+
+        if (window_) {
+            builder.addPresentationDependency();
+        }
+
+        renderPass_ = builder.build();
     }
-
-    // Add presentation dependency for window targets
-    if (window_) {
-        builder.addPresentationDependency();
-    }
-
-    renderPass_ = builder.build();
 }
 
 void RenderTarget::createDepthResources() {
@@ -317,19 +353,36 @@ void RenderTarget::createDepthResources() {
         .build();
 }
 
+void RenderTarget::createMsaaResources() {
+    msaaColorImage_ = Image::createColorAttachment(
+        device_, extent_.width, extent_.height, colorFormat_, msaaSamples_);
+    msaaColorView_ = msaaColorImage_->createView(VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
 void RenderTarget::createFramebuffers() {
+    bool hasMsaa = msaaSamples_ != VK_SAMPLE_COUNT_1_BIT;
+
     if (window_) {
-        // Create framebuffers for each swap chain image
         auto* swapChain = window_->swapChain();
         const auto& imageViews = swapChain->imageViews();
 
         for (size_t i = 0; i < imageViews.size(); i++) {
             auto builder = Framebuffer::create(device_, renderPass_.get())
-                .attachment(imageViews[i]->handle())
                 .extent(extent_.width, extent_.height);
 
-            if (depthImage_) {
-                builder.attachment(depthImage_->view());
+            if (hasMsaa) {
+                // Attachment order: [MSAA color, depth?, resolve(swap chain)]
+                builder.attachment(msaaColorView_.get());
+                if (depthImage_) {
+                    builder.attachment(depthImage_->view());
+                }
+                builder.attachment(imageViews[i]->handle());
+            } else {
+                // Attachment order: [swap chain, depth?]
+                builder.attachment(imageViews[i]->handle());
+                if (depthImage_) {
+                    builder.attachment(depthImage_->view());
+                }
             }
 
             framebuffers_.push_back(builder.build());
@@ -337,22 +390,35 @@ void RenderTarget::createFramebuffers() {
     } else {
         // Off-screen: single framebuffer
         auto builder = Framebuffer::create(device_, renderPass_.get())
-            .attachment(colorImage_->view())
             .extent(extent_.width, extent_.height);
 
-        if (depthImage_) {
-            builder.attachment(depthImage_->view());
+        if (hasMsaa) {
+            builder.attachment(msaaColorView_.get());
+            if (depthImage_) {
+                builder.attachment(depthImage_->view());
+            }
+            builder.attachment(colorImage_->view());
+        } else {
+            builder.attachment(colorImage_->view());
+            if (depthImage_) {
+                builder.attachment(depthImage_->view());
+            }
         }
 
         framebuffers_.push_back(builder.build());
     }
 }
 
-void RenderTarget::setupWindowResizeCallback() {
-    // Window handles resize internally and recreates swap chain
-    // We listen to resize to recreate our depth buffer and framebuffers
-    // Note: This is a simplified approach - in production you might want
-    // to use the device destruction callback pattern or a more robust system
+void RenderTarget::checkResize() {
+    if (!window_) return;
+
+    auto* swapChain = window_->swapChain();
+    if (!swapChain) return;
+
+    auto currentExtent = swapChain->extent();
+    if (currentExtent.width != extent_.width || currentExtent.height != extent_.height) {
+        recreate();
+    }
 }
 
 } // namespace finevk

@@ -62,6 +62,9 @@ struct DeviceCapabilities {
     VkSampleCountFlagBits selectMSAA(MSAAPreference pref,
         VkSampleCountFlagBits requested = VK_SAMPLE_COUNT_1_BIT) const;
 
+    // Depth format selection (finds best supported depth format)
+    VkFormat selectDepthFormat(VkPhysicalDevice device) const;
+
     // Feature checking with lambda
     bool supportsFeature(std::function<bool(const VkPhysicalDeviceFeatures&)> check) const;
 

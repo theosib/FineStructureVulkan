@@ -22,7 +22,8 @@ Errors:     Throws std::runtime_error on failure
 - Manually manage fences/semaphores — `SimpleRenderer::beginFrame()` handles synchronization
 - Destroy GPU resources immediately — use `renderer->deferDelete(std::move(resource))`
 - Call `device->waitIdle()` in the frame loop — use DeletionQueue for per-resource sync
-- Manually recreate swap chain on resize — Window and SimpleRenderer handle this
+- Manually recreate swap chain on resize — Window, SimpleRenderer, and RenderTarget handle this
+- Hardcode depth format (`VK_FORMAT_D32_SFLOAT`) — use `DeviceCapabilities::selectDepthFormat()` or `RenderTarget::enableDepth()`
 - Wrap `VkFormat`, `VkExtent2D`, or GLFW key codes — these are data, not mechanics
 - Use legacy APIs (`fromFile`, `fromMemory`, `loadOBJ`, `fromOBJ`) — use `Texture::load()` / `Mesh::load()` builders
 - Set pipeline `samples()` without matching the render pass — use `renderer->msaaSamples()`
@@ -78,6 +79,8 @@ createLogicalDevice() -> LogicalDeviceBuilder
 properties, features, memory: Vulkan structs
 supportsAnisotropy() -> bool
 maxSampleCount() -> VkSampleCountFlagBits
+selectMSAA(MSAAPreference, requested?) -> VkSampleCountFlagBits
+selectDepthFormat(VkPhysicalDevice) -> VkFormat  // Best supported depth format
 graphicsQueueFamily() -> optional<uint32_t>
 ```
 
@@ -372,17 +375,17 @@ DescriptorBinding(renderer, pipelineLayout, vector<VkDescriptorSet>, setIndex?)
 ### RenderTarget
 
 ```cpp
-// Window-based (auto-resizes)
+// Window-based (auto-resizes, auto-detects resize in begin())
 RenderTarget::create(window, enableDepth?) -> RenderTargetPtr
 
 // Builder (window or off-screen)
 RenderTarget::create(device)
     .window(window)                   // Window-based
     .colorAttachment(image_or_view)   // Off-screen
-    .enableDepth()                    // Auto-select depth format
+    .enableDepth()                    // Auto-select best depth format via DeviceCapabilities
     .depthFormat(VkFormat)            // Specific depth format
     .depthAttachment(image)           // Use existing depth buffer
-    .msaa(VkSampleCountFlagBits)
+    .msaa(VkSampleCountFlagBits)     // Full MSAA with resolve attachments
     .build() -> RenderTargetPtr
 
 renderPass() -> RenderPass*
@@ -390,8 +393,12 @@ currentFramebuffer() -> Framebuffer*   // Auto-selects for window targets
 framebuffer(index) -> Framebuffer*
 extent() -> VkExtent2D | colorFormat() -> VkFormat | depthFormat() -> VkFormat
 msaaSamples() -> VkSampleCountFlagBits | hasDepth() -> bool
-begin(cmd, clearColor, clearDepth?) | end(cmd)
-recreate()  // Auto for window targets
+begin(cmd, clearColor, clearDepth?) | end(cmd)  // Auto-resizes window targets
+recreate()
+
+// MSAA: enableDepth() validates format via DeviceCapabilities::selectDepthFormat().
+// msaa() creates MSAA color image + resolve attachment automatically.
+// Window targets auto-resize in begin() — no manual recreate needed.
 ```
 
 ### Sync

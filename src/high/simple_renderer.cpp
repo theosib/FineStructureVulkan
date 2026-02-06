@@ -17,30 +17,10 @@
 
 namespace finevk {
 
-VkSampleCountFlagBits SimpleRenderer::selectMsaaSamples(MSAALevel level) {
-    // Get max supported sample count from the device's physical device
-    auto* physDevice = device()->physicalDevice();
-    VkSampleCountFlags counts =
-        physDevice->capabilities().properties.limits.framebufferColorSampleCounts &
-        physDevice->capabilities().properties.limits.framebufferDepthSampleCounts;
-
-    VkSampleCountFlagBits requested = static_cast<VkSampleCountFlagBits>(static_cast<int>(level));
-
-    // Find the highest supported sample count that doesn't exceed requested
-    if (requested >= VK_SAMPLE_COUNT_16_BIT && (counts & VK_SAMPLE_COUNT_16_BIT)) {
-        return VK_SAMPLE_COUNT_16_BIT;
-    }
-    if (requested >= VK_SAMPLE_COUNT_8_BIT && (counts & VK_SAMPLE_COUNT_8_BIT)) {
-        return VK_SAMPLE_COUNT_8_BIT;
-    }
-    if (requested >= VK_SAMPLE_COUNT_4_BIT && (counts & VK_SAMPLE_COUNT_4_BIT)) {
-        return VK_SAMPLE_COUNT_4_BIT;
-    }
-    if (requested >= VK_SAMPLE_COUNT_2_BIT && (counts & VK_SAMPLE_COUNT_2_BIT)) {
-        return VK_SAMPLE_COUNT_2_BIT;
-    }
-
-    return VK_SAMPLE_COUNT_1_BIT;
+static VkSampleCountFlagBits selectMsaaSamples(LogicalDevice* device, MSAALevel level) {
+    auto* physDevice = device->physicalDevice();
+    auto requested = static_cast<VkSampleCountFlagBits>(static_cast<int>(level));
+    return physDevice->capabilities().selectMSAA(MSAAPreference::Specific, requested);
 }
 
 std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
@@ -60,7 +40,7 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     renderer->config_ = config;
 
     // Select MSAA sample count based on config and hardware support
-    renderer->msaaSamples_ = renderer->selectMsaaSamples(config.msaa);
+    renderer->msaaSamples_ = selectMsaaSamples(renderer->device(), config.msaa);
 
     if (renderer->msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         FINEVK_INFO(LogCategory::Core, "MSAA enabled: " +
@@ -121,27 +101,8 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
 void SimpleRenderer::createRenderPass() {
     // Find depth format if needed
     if (config_.enableDepthBuffer) {
-        std::vector<VkFormat> candidates = {
-            VK_FORMAT_D32_SFLOAT,
-            VK_FORMAT_D32_SFLOAT_S8_UINT,
-            VK_FORMAT_D24_UNORM_S8_UINT
-        };
-
         auto* physDevice = device()->physicalDevice();
-        VkFormatFeatureFlags features = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        for (VkFormat format : candidates) {
-            VkFormatProperties props;
-            vkGetPhysicalDeviceFormatProperties(
-                physDevice->handle(), format, &props);
-            if ((props.optimalTilingFeatures & features) == features) {
-                depthFormat_ = format;
-                break;
-            }
-        }
-
-        if (depthFormat_ == VK_FORMAT_UNDEFINED) {
-            throw std::runtime_error("Failed to find suitable depth format");
-        }
+        depthFormat_ = physDevice->capabilities().selectDepthFormat(physDevice->handle());
     }
 
     // Use the simple render pass factory
@@ -198,12 +159,28 @@ void SimpleRenderer::createFramebuffers() {
 }
 
 void SimpleRenderer::recreateResources() {
-    // Called when window resize is detected
-    // Wait for device idle before recreating
-    device()->waitIdle();
+    // Defer old resources to DeletionQueue — they may still be referenced
+    // by in-flight frames. The render pass is NOT recreated because it only
+    // depends on formats and MSAA sample count, not dimensions.
+    // Push order matters: framebuffers -> views -> images (views reference images).
+    if (deletionQueue_) {
+        deletionQueue_->push(
+            std::shared_ptr<SwapChainFramebuffers>(framebuffers_.release()));
+        if (colorView_)
+            deletionQueue_->push(
+                std::shared_ptr<ImageView>(colorView_.release()));
+        if (depthView_)
+            deletionQueue_->push(
+                std::shared_ptr<ImageView>(depthView_.release()));
+        if (colorImage_)
+            deletionQueue_->push(
+                std::shared_ptr<Image>(colorImage_.release()));
+        if (depthImage_)
+            deletionQueue_->push(
+                std::shared_ptr<Image>(depthImage_.release()));
+    }
 
-    cleanupResources();
-
+    // Create new resources at the current window size
     if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         createColorResources();
     }

@@ -153,6 +153,8 @@ VkSampleCountFlagBits DeviceCapabilities::selectMSAA(
                 return requested;
             }
             // Fall back to lower sample counts
+            if (requested >= VK_SAMPLE_COUNT_16_BIT && (supported & VK_SAMPLE_COUNT_16_BIT))
+                return VK_SAMPLE_COUNT_16_BIT;
             if (requested >= VK_SAMPLE_COUNT_8_BIT && (supported & VK_SAMPLE_COUNT_8_BIT))
                 return VK_SAMPLE_COUNT_8_BIT;
             if (requested >= VK_SAMPLE_COUNT_4_BIT && (supported & VK_SAMPLE_COUNT_4_BIT))
@@ -163,6 +165,24 @@ VkSampleCountFlagBits DeviceCapabilities::selectMSAA(
         }
     }
     return VK_SAMPLE_COUNT_1_BIT;
+}
+
+VkFormat DeviceCapabilities::selectDepthFormat(VkPhysicalDevice device) const {
+    const VkFormat candidates[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT
+    };
+
+    for (VkFormat format : candidates) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(device, format, &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return format;
+        }
+    }
+
+    throw std::runtime_error("Failed to find suitable depth format");
 }
 
 bool DeviceCapabilities::supportsFeature(

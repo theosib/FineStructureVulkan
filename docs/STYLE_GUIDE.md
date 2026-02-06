@@ -155,13 +155,10 @@ while (window->isOpen()) {
 
 Current state:
 - `Window` recreates swap chain automatically
-- `SimpleRenderer` detects size mismatch in `beginFrame()` and recreates its resources
-- `RenderTarget` (window-based) recreates via resize callback
+- `SimpleRenderer` detects size mismatch in `beginFrame()` and recreates its resources using `DeletionQueue` for old resources (no `waitIdle()`)
+- `RenderTarget` (window-based) detects size mismatch in `begin()` and recreates automatically
 
-**Problem:** `SimpleRenderer::recreateResources()` calls `device()->waitIdle()`, which is a global GPU stall. This should use `DeletionQueue` instead:
-- Create new framebuffers/depth images for the new size
-- Push old ones into `DeletionQueue` for safe deferred cleanup
-- No `waitIdle()` needed - the fence-based deletion handles timing
+**Implementation:** Old framebuffers, depth images, and MSAA color images are pushed into `DeletionQueue` on resize. New resources are created at the new size. The render pass is NOT recreated (it depends on formats/MSAA sample count, not dimensions). The fence-based deletion handles GPU synchronization automatically.
 
 ---
 
@@ -230,18 +227,17 @@ Each level builds on the previous. Documentation should lead with Level 1 and on
 
 Based on the philosophy above, these are the areas where the current code deviates from the ideal:
 
-1. **Resize uses `waitIdle()`** - `SimpleRenderer::recreateResources()` stalls the GPU. Should use DeletionQueue for old resources.
+1. ~~**Resize uses `waitIdle()`**~~ **RESOLVED** - `SimpleRenderer::recreateResources()` now uses DeletionQueue to defer old framebuffers/depth/MSAA images. No `waitIdle()` in the resize path.
 2. **Swap chain index sometimes leaks** - `FrameBeginResult::imageIndex` and `FrameInfo::imageIndex` expose internal mechanics. Users drawing through SimpleRenderer never need these.
 3. **Redundant mechanics in examples** - The `viking_room` example manually sizes descriptor pools, manually writes descriptor sets per frame, manually passes vertex binding descriptions. Much of this could be automated by `Material`.
-4. **SimpleRenderer and RenderTarget overlap** - Both manage render pass + framebuffers + depth. They should share infrastructure or unify, so on-screen and off-screen rendering use the same abstraction.
-5. **No automatic resize for user resources** - Pipelines, render targets, and other size-dependent objects require manual recreation. A notification/callback system would help.
+4. **SimpleRenderer and RenderTarget overlap** - Both manage render pass + framebuffers + depth. Duplication reduced (shared `DeviceCapabilities::selectDepthFormat()` and `selectMSAA()`), but full unification is a future goal.
+5. ~~**No automatic resize for RenderTarget**~~ **RESOLVED** - `RenderTarget::begin()` auto-detects resize for window targets.
 
 ---
 
 ## Proposed Next Steps
 
-1. **Address resize without `waitIdle()`** - Use DeletionQueue for old framebuffers/depth/MSAA images
-2. **Unify SimpleRenderer and RenderTarget** - Make drawing to a window and off-screen look identical
-3. **Improve the viking_room example** - Show Material-based workflow instead of manual descriptors
-4. **Hide swap chain index** from the standard API path (keep accessible at Level 3+)
-5. **Add resize callbacks** so user-created resources can auto-update
+1. **Unify SimpleRenderer and RenderTarget** - Make drawing to a window and off-screen look identical
+2. **Improve the viking_room example** - Show Material-based workflow instead of manual descriptors
+3. **Hide swap chain index** from the standard API path (keep accessible at Level 3+)
+4. **Material auto frame tracking** - Auto-discover current frame from SimpleRenderer

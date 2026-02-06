@@ -149,8 +149,8 @@ public:
     /**
      * @brief Recreate resources after resize
      *
-     * For window targets, this is called automatically when the window resizes.
-     * For off-screen targets, call this if you change the backing image.
+     * For window targets, this is called automatically in begin() when
+     * a size mismatch is detected. Can also be called manually.
      */
     void recreate();
 
@@ -172,8 +172,9 @@ private:
     void createRenderPass();
     void createFramebuffers();
     void createDepthResources();
+    void createMsaaResources();
     void cleanup();
-    void setupWindowResizeCallback();
+    void checkResize();
 
     LogicalDevice* device_ = nullptr;
     Window* window_ = nullptr;  // Non-owning, for window-based targets
@@ -186,6 +187,7 @@ private:
     std::vector<FramebufferPtr> framebuffers_;
     ImagePtr depthImage_;       // Owned depth buffer (if enableDepth)
     ImagePtr msaaColorImage_;   // Owned MSAA color image (if MSAA enabled)
+    ImageViewPtr msaaColorView_;
 
     // Configuration
     VkExtent2D extent_{};
