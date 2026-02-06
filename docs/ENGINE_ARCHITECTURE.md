@@ -433,6 +433,64 @@ GameLoop automatically integrates DeferredDisposer:
 - `include/finevk/engine/deferred_disposer.hpp`
 - `src/engine/deferred_disposer.cpp`
 
+### DeletionQueue
+
+**Purpose**: Fence-based, per-frame-slot deferred deletion with exact GPU completion guarantees.
+
+**Problem**: DeferredDisposer counts GC cycles (not GPU frames), giving only approximate timing. When replacing textures or buffers mid-frame, you need a guarantee that the GPU has finished reading the old resource before destroying it.
+
+**Solution**: Per-frame-slot deletion queues that drain automatically when the frame fence is waited on. This piggybacks on the fence wait that already happens in `beginFrame()` - zero extra synchronization overhead.
+
+**How it Works**:
+```
+Frame slot 0: [fence waited] → drain slot 0 queue → record → submit
+Frame slot 1: [fence waited] → drain slot 1 queue → record → submit
+Frame slot 2: [fence waited] → drain slot 2 queue → record → submit
+Frame slot 0: [fence waited] → drain slot 0 queue → ...  (GPU done with slot 0's previous work)
+```
+
+**API (via SimpleRenderer - recommended)**:
+```cpp
+// Replace a texture - old one safely deleted after GPU finishes
+renderer->deferDelete(std::move(oldTexture));  // unique_ptr
+renderer->deferDelete(sharedResource);          // shared_ptr
+renderer->deferDelete([h]() { cleanup(h); });   // custom callback
+```
+
+**Standalone API**:
+```cpp
+DeletionQueue queue(framesInFlight);
+
+// In frame loop, after fence wait:
+queue.beginFrame(currentFrameSlot);
+
+// During frame:
+queue.push(std::move(resource));
+queue.push([handle]() { vkDestroyBuffer(device, handle, nullptr); });
+
+// Shutdown:
+queue.flushAll();
+```
+
+**SimpleRenderer Integration**:
+- `beginFrame()` calls `deletionQueue_->beginFrame(frameIndex)` after the fence wait
+- Resources queued during frame N are destroyed when slot N is reused
+- Destructor calls `flushAll()` after `waitIdle()`
+- Device destruction callback flushes the queue before releasing resources
+
+**DeferredDisposer vs DeletionQueue**:
+| | DeferredDisposer | DeletionQueue |
+|---|---|---|
+| **Timing** | Approximate (GC cycle count) | Exact (GPU fence) |
+| **Scope** | Global singleton | Per-renderer |
+| **Integration** | GameLoop | SimpleRenderer |
+| **Use case** | General cleanup | GPU resource replacement |
+| **Thread-safe** | Yes | Yes |
+
+**Files**:
+- `include/finevk/rendering/deletion_queue.hpp`
+- `src/rendering/deletion_queue.cpp`
+
 ---
 
 ## 5. OPTIMIZATION

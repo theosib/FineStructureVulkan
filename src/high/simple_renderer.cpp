@@ -80,18 +80,23 @@ std::unique_ptr<SimpleRenderer> SimpleRenderer::create(
     }
     renderer->createFramebuffers();
 
-    // Create command buffers for each frame in flight
+    // Create command buffers and deletion queue for each frame in flight
     uint32_t framesInFlight = window->framesInFlight();
     renderer->commandBuffers_.reserve(framesInFlight);
     for (uint32_t i = 0; i < framesInFlight; i++) {
         renderer->commandBuffers_.push_back(
             renderer->commandPool_->allocate());
     }
+    renderer->deletionQueue_ = std::make_unique<DeletionQueue>(framesInFlight);
 
     // Register for device destruction notification so we can clean up
     // our resources before the device is destroyed
     renderer->deviceDestructionCallbackId_ = renderer->device()->onDestruction(
         [r = renderer.get()](LogicalDevice*) {
+            // Flush deferred deletions before releasing device resources
+            if (r->deletionQueue_) {
+                r->deletionQueue_->flushAll();
+            }
             // Clean up all device-dependent resources
             r->commandBuffers_.clear();
             r->commandPool_ = nullptr;  // Non-owning, just clear the pointer
@@ -260,6 +265,13 @@ FrameBeginResult SimpleRenderer::beginFrame() {
     currentFrameInfo_ = *frameOpt;
     currentImageIndex_ = currentFrameInfo_->imageIndex;
 
+    // Drain deferred deletions for this frame slot.
+    // The fence for this slot was just waited on, so the GPU is done with
+    // all resources that were queued when this slot was last active.
+    if (deletionQueue_) {
+        deletionQueue_->beginFrame(currentFrameInfo_->frameIndex);
+    }
+
     // Check if we need to recreate our resources
     auto currentExtent = extent();
     if (framebuffers_ && framebuffers_->count() > 0) {
@@ -411,6 +423,12 @@ Sampler* SimpleRenderer::defaultSampler() {
     return defaultSampler_.get();
 }
 
+void SimpleRenderer::deferDelete(std::function<void()> deleter) {
+    if (deletionQueue_) {
+        deletionQueue_->push(std::move(deleter));
+    }
+}
+
 SimpleRenderer::~SimpleRenderer() {
     auto* dev = device();
     if (dev) {
@@ -421,7 +439,11 @@ SimpleRenderer::~SimpleRenderer() {
         }
         dev->waitIdle();
     }
-    // Resources will be cleaned up by their destructors
+    // Flush all pending deferred deletions (GPU is idle now)
+    if (deletionQueue_) {
+        deletionQueue_->flushAll();
+    }
+    // Remaining resources will be cleaned up by their destructors
 }
 
 } // namespace finevk

@@ -641,6 +641,12 @@ SimpleRenderer:
     currentFrame() -> uint32_t  // Current frame index (0 to framesInFlight-1)
     framesInFlight() -> uint32_t
 
+    // Deferred deletion (GPU-safe resource cleanup)
+    deferDelete(std::function<void()>)   // Queue callback for after GPU is done
+    deferDelete(std::unique_ptr<T>)      // Queue resource for safe deletion
+    deferDelete(std::shared_ptr<T>)      // Queue shared ref release
+    deletionQueue() -> DeletionQueue*  // Direct access (advanced)
+
     // Access internals
     window() -> Window*
     device() -> LogicalDevice*
@@ -941,6 +947,68 @@ while (window->isOpen()) {
 }
 renderer->waitIdle();
 ```
+
+## Deferred Deletion (GPU-Safe Resource Cleanup)
+
+When replacing a GPU resource (texture, buffer, etc.) mid-frame, you can't destroy
+the old one immediately - the GPU may still be reading it from a previous frame's
+command buffer. FineVK provides two mechanisms:
+
+### DeletionQueue (Fence-Based, Recommended)
+
+Integrated into SimpleRenderer. Resources queued via `deferDelete()` are destroyed
+after `framesInFlight` frames, when the corresponding frame fence proves the GPU
+is done. Zero extra synchronization overhead.
+
+```cpp
+// Replace a texture - old one safely deleted after GPU finishes
+auto oldTexture = std::move(myTexture_);
+myTexture_ = Texture::fromFile(device, "new.png", cmdPool);
+renderer->deferDelete(std::move(oldTexture));
+
+// Works with any resource type
+renderer->deferDelete(std::move(oldBuffer));
+
+// Works with shared_ptr (releases reference)
+renderer->deferDelete(sharedTexture);
+
+// Works with lambda (custom cleanup)
+renderer->deferDelete([handle]() { vkDestroySomething(handle); });
+```
+
+**How it works**: Each frame slot has its own deletion queue. `beginFrame()` waits
+on the frame fence (GPU done with that slot's previous work), then drains that
+slot's queue. Resources pushed during frame N are destroyed when slot N is reused
+(after `framesInFlight` frames).
+
+**Standalone usage** (without SimpleRenderer):
+```cpp
+DeletionQueue queue(framesInFlight);
+
+// After fence wait in your frame loop:
+queue.beginFrame(currentFrameSlot);
+
+// Queue deletions during frame:
+queue.push(std::move(resource));
+```
+
+Header: `finevk/rendering/deletion_queue.hpp`
+
+### DeferredDisposer (Frame-Count Approximate)
+
+Global singleton for general deferred cleanup. Less precise than DeletionQueue
+(counts GC cycles, not GPU frames) but works anywhere without a renderer.
+
+```cpp
+DeferredDisposer::global().dispose(
+    [res = std::move(resource)]() mutable { res.reset(); },
+    frameDelay  // default: 2
+);
+```
+
+Integrated into GameLoop's garbage collection cycle.
+
+Header: `finevk/engine/deferred_disposer.hpp`
 
 ## Engine Features
 

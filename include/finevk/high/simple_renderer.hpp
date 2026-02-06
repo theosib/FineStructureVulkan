@@ -4,6 +4,7 @@
 #include "finevk/window/window.hpp"
 #include "finevk/high/mesh.hpp"
 #include "finevk/high/uniform_buffer.hpp"
+#include "finevk/rendering/deletion_queue.hpp"
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -208,6 +209,51 @@ public:
      */
     void waitIdle();
 
+    // =========================================================================
+    // Deferred Deletion
+    // =========================================================================
+
+    /**
+     * @brief Queue a resource for GPU-safe deferred deletion
+     *
+     * The resource will be destroyed after the current frame's work completes
+     * on the GPU (specifically, when this frame slot is next reused after
+     * framesInFlight frames). This is safe for any resource referenced by
+     * the current frame's command buffers.
+     *
+     * @param deleter Function that destroys the resource
+     */
+    void deferDelete(std::function<void()> deleter);
+
+    /**
+     * @brief Queue a unique_ptr for GPU-safe deferred deletion
+     *
+     * @code
+     * auto oldTexture = std::move(myTexture_);
+     * myTexture_ = loadNewTexture();
+     * renderer->deferDelete(std::move(oldTexture));
+     * @endcode
+     */
+    template<typename T>
+    void deferDelete(std::unique_ptr<T> resource) {
+        if (deletionQueue_) deletionQueue_->push(std::move(resource));
+    }
+
+    /**
+     * @brief Queue a shared_ptr for GPU-safe deferred reference release
+     */
+    template<typename T>
+    void deferDelete(std::shared_ptr<T> resource) {
+        if (deletionQueue_) deletionQueue_->push(std::move(resource));
+    }
+
+    /// Access the frame deletion queue directly (for advanced use)
+    DeletionQueue* deletionQueue() { return deletionQueue_.get(); }
+
+    // =========================================================================
+    // Utilities
+    // =========================================================================
+
     /**
      * @brief Get the default sampler
      *
@@ -266,6 +312,9 @@ private:
 
     // Default resources
     SamplerPtr defaultSampler_;
+
+    // Deferred deletion (fence-based, per frame slot)
+    std::unique_ptr<DeletionQueue> deletionQueue_;
 
     // Device destruction callback registration
     size_t deviceDestructionCallbackId_ = 0;
