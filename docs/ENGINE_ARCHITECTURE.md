@@ -65,11 +65,13 @@ This engine will be developed **iteratively**:
 1. STRUCTURE           - Library layout, dependencies
 2. GAMELOOP            - Frame management, timing
 3. RENDER_AGENT        - Multi-phase rendering system
-4. RESOURCE_MGT        - Deferred disposal, async loading
-5. OPTIMIZATION        - Batching, culling, etc.
-6. COORDINATE_SYSTEM   - Large world support
-7. PATTERNS            - Reusable engine patterns
-8. STATUS              - What's implemented, what's planned
+4. RESOURCE_MGT        - Deferred disposal, async loading, DeletionQueue
+5. CAMERA              - View/projection, large worlds, frustum culling
+6. OVERLAY_2D          - Screen-space 2D rendering, text, HUD
+7. INPUT               - Input management, action mapping
+8. ASSET_LOADING       - Async asset loading with sentinels
+9. PATTERNS            - Reusable engine patterns
+10. STATUS             - What's implemented, what's planned
 ```
 
 ---
@@ -80,23 +82,25 @@ This engine will be developed **iteratively**:
 
 ```
 include/finevk/
-├── core/              # finevk-core (existing)
+├── core/              # finevk-core
 ├── device/
-├── rendering/
+├── rendering/         # Includes DeletionQueue
 ├── high/
 ├── window/
-└── engine/            # NEW: finevk-engine
+└── engine/            # finevk-engine
+    ├── finevk_engine.hpp      # Umbrella header
     ├── game_loop.hpp
     ├── frame_clock.hpp
     ├── render_agent.hpp
     ├── deferred_disposer.hpp
-    ├── work_queue.hpp
-    ├── draw_batcher.hpp
-    └── coordinate_system.hpp
+    ├── camera.hpp
+    ├── overlay2d.hpp
+    ├── font_atlas.hpp
+    ├── text_renderer.hpp
+    ├── input_manager.hpp
+    └── asset_loader.hpp
 
-src/
-├── (core, device, rendering, high, window)  # existing
-└── engine/            # NEW: finevk-engine implementations
+src/engine/            # Matching implementations
 ```
 
 ### CMake Structure
@@ -493,37 +497,79 @@ queue.flushAll();
 
 ---
 
-## 5. OPTIMIZATION
-
-### DrawBatcher
-
-**Purpose**: Reduce draw call overhead by batching similar objects.
-
-**Design**: TBD based on actual game needs.
-
-### Culling
-
-**Purpose**: Frustum/occlusion culling to skip invisible objects.
-
-**Design**: TBD based on actual game needs.
-
----
-
-## 6. COORDINATE_SYSTEM
+## 5. CAMERA
 
 ### Purpose
-Handle large game worlds without floating-point precision issues.
+View/projection management with large-world support and frustum culling.
 
-**Design**: TBD based on actual game needs.
+### Key Features
+- **Dual precision**: Float position for standard use, double-precision auto-enabled via `moveTo(dvec3)`
+- **View-relative rendering**: `CameraState::viewRelative` provides rotation-only matrix for jitter-free large-world rendering. Per-object offsets computed on CPU with doubles.
+- **Frustum culling**: Both world-space and view-relative frustum planes computed in `updateState()`
+- **AABB intersection**: `AABB::intersectsFrustum()` for efficient culling
 
-Possible approaches:
-- Origin shifting
-- Chunked world space
-- Double-precision camera position with single-precision relative coordinates
+### Large-World Pattern (implemented)
+```
+Double-precision camera position + single-precision relative rendering:
+1. Camera stores position as dvec3
+2. viewRelative matrix = rotation only (camera at origin)
+3. Per-object: vec3 offset = vec3(objectWorldPos - camera.positionD())
+4. Pass offset as push constant to shader
+5. Cull with viewRelativeFrustumPlanes against relative AABBs
+```
+
+**Files**: `include/finevk/engine/camera.hpp`, `src/engine/camera.cpp`
 
 ---
 
-## 7. PATTERNS
+## 6. OVERLAY_2D
+
+### Purpose
+Screen-space 2D rendering for HUD, debug overlays, and text.
+
+### Components
+- **Overlay2D**: Quad-based 2D renderer with texture batching, alpha blending, pixel coordinates
+- **FontAtlas**: TrueType font loading via stb_truetype, glyph atlas, kerning, measurement
+- **TextRenderer**: 3D world-space text (signs, billboards) with depth testing
+
+### Auto-Discovery Pattern
+When created with `SimpleRenderer*`, Overlay2D auto-discovers framesInFlight, msaaSamples, and provides automatic frame tracking (`beginFrame()` with no arguments).
+
+**Files**: `include/finevk/engine/overlay2d.hpp`, `font_atlas.hpp`, `text_renderer.hpp`
+
+---
+
+## 7. INPUT
+
+### Purpose
+Comprehensive input handling with fat events, state snapshots, and action mapping.
+
+### Key Design Decisions
+- **Fat events**: Every `InputEvent` includes complete `InputState` snapshot — query any key during any event type
+- **Three consumption modes**: Callback, polling (`pollEvent`), and direct queries (`wasKeyPressed`)
+- **Action mapping**: Rebindable named actions (`mapAction("jump", Key::Space)`)
+- **Per-frame semantics**: `wasKeyPressed()` only true for one frame after `update()`
+
+**Files**: `include/finevk/engine/input_manager.hpp`, `src/engine/input_manager.cpp`
+
+---
+
+## 8. ASSET_LOADING
+
+### Purpose
+Asynchronous asset loading with never-null sentinel pattern.
+
+### Key Design Decisions
+- **Never returns null**: `loadTexture()` returns immediately with a TextureRef that shows a sentinel (checkerboard) until the real asset loads
+- **Path-based caching**: Same path returns same shared object
+- **Time-budgeted uploads**: `update()` processes GPU uploads within a frame time budget (default 2ms)
+- **Worker thread pool**: Background threads handle disk I/O and CPU decoding
+
+**Files**: `include/finevk/engine/asset_loader.hpp`, `src/engine/asset_loader.cpp`
+
+---
+
+## Patterns
 
 ### Pattern Discovery Process
 
@@ -544,83 +590,48 @@ As we build games, we'll discover patterns. Document them here with:
 
 ---
 
-## 8. STATUS
+## 10. STATUS
 
-### Phase 5: Initial Engine Setup ✓ (Completed)
+### Phase 5: Initial Engine Setup ✓
 
-**Completed**:
-- ✓ Set up CMake for finevk-engine library (optional build target)
-- ✓ Created directory structure (include/finevk/engine/, src/engine/)
-- ✓ Implemented FrameClock utility for timing
-- ✓ Implemented GameLoop with full design:
-  - Inheritance-first pattern with listener fallback
-  - Explicit setup/run/shutdown lifecycle
-  - Fixed timestep game logic with variable framerate rendering
-  - Comprehensive virtual method interception points
-  - Exception-based error handling
-  - Window resize integration
-- ✓ Build system validates: all tests and examples still compile
+- ✓ CMake build system for finevk-engine (optional target)
+- ✓ FrameClock, GameLoop, DeferredDisposer
 
-**Files Added**:
-- `include/finevk/engine/frame_clock.hpp` - High-resolution timing utility
-- `src/engine/frame_clock.cpp`
-- `include/finevk/engine/deferred_disposer.hpp` - Thread-safe deferred resource disposal
-- `src/engine/deferred_disposer.cpp`
-- `include/finevk/engine/game_loop.hpp` - Main game loop with fixed timestep
-- `src/engine/game_loop.cpp`
-- `include/finevk/engine/finevk_engine.hpp` - Convenience header
+### Phase 6: Voxel Integration ✓
 
-**Additional Implementations**:
-- ✓ DeferredDisposer with time-budgeted disposal loop
-- ✓ GameLoop restart capability (setup/shutdown state management)
-- ✓ Integrated DeferredDisposer into GameLoop's garbage collection
+- ✓ **Camera** - View/projection, double-precision, view-relative, AABB frustum culling
+- ✓ **RenderAgent** - Multi-phase rendering (Opaque, Transparent, UI)
+- **Promoted to core**: RawMesh, BufferPool, StagingPool, GraphicsPipeline conveniences
 
-### Phase 6: Voxel Integration ✓ (Completed)
+### Phase 7: Game Engine Features ✓
 
-**Completed** (driven by FineStructureVoxel integration needs):
-- ✓ **Camera** - View/projection system with AABB frustum culling
-  - Double-precision position support for large worlds (`moveTo(glm::dvec3)`)
-  - View-relative matrix for jitter-free large-world rendering
-  - Movement helpers (moveForward, rotateYaw, etc.)
-- ✓ **RenderAgent** - Multi-phase rendering system
-  - Object submission with transform, material, pipeline
-  - Phase-based rendering (Opaque, Transparent, UI)
-  - Camera state integration
+- ✓ **Overlay2D** - 2D screen-space rendering with texture batching
+  - Auto frame tracking via `SimpleRenderer*` constructor
+- ✓ **FontAtlas** - TrueType font loading, glyph atlas, kerning, measurement
+- ✓ **TextRenderer** - 3D world-space text (signs, billboards)
+- ✓ **InputManager** - Fat events, state snapshots, action mapping, 3 consumption modes
+- ✓ **AssetLoader** - Async loading with never-null sentinels, path caching, time-budgeted uploads
+- ✓ **DeletionQueue** (core) - Fence-based per-frame-slot deferred deletion, integrated into SimpleRenderer
+- ✓ **High-DPI detection** - Window contentScale(), isHighDPI()
 
-**Promoted to finevk-core** (from voxel prototype needs):
-- ✓ **RawMesh** - Custom vertex formats with bulk upload
-- ✓ **BufferPool** - Sub-allocation for many small buffers
-- ✓ **StagingPool** - Reusable staging buffers with fence tracking
-- ✓ **GraphicsPipeline conveniences** - `vertexInput<T>()`, path-based shader loading, `cullBack()`
+### Next Steps
 
-### Phase 7: Prototype-Driven Development
-
-**Goals**: Build 2-3 small game prototypes to discover additional patterns
-
-**Prototypes to consider**:
-1. **2D Sprite Game** - Batch rendering, texture atlases, sprite sorting
-2. **3D Scene Walker** - Camera, culling, lighting
-3. **Particle System** - Instanced rendering, compute shaders
-
-After each prototype:
-- Extract common patterns
-- Promote complex bits to finevk-core if needed
-- Refine engine abstractions
-
-### Future Phases
-
-Will be defined after prototype feedback.
+- Resize without `waitIdle()` — use DeletionQueue for old framebuffers/depth images
+- Unify SimpleRenderer and RenderTarget infrastructure
+- Add resize callbacks for user-created resources
+- Prototype-driven feature discovery
 
 ---
 
 ## Appendix A: Promotion History
 
-**Track features that moved from engine → core**:
+**Features that moved from engine → core**:
 
-- **RawMesh** (Phase 6) - Type-erased custom vertex mesh class. Promoted from voxel prototype because it requires Vulkan buffer management knowledge and is useful beyond games (data visualization, CAD, etc.)
-- **BufferPool** (Phase 6) - Sub-allocation from large buffer blocks. Promoted because it requires VMA knowledge and reduces allocation overhead for many use cases
-- **StagingPool** (Phase 6) - Reusable staging buffers with fence tracking. Promoted for similar reasons to BufferPool
-- **GraphicsPipeline conveniences** (Phase 6) - `vertexInput<T>()`, path-based shader loading, `cullBack()`/`cullFront()`/`cullNone()`. Added directly to core as API improvements
+- **RawMesh** (Phase 6) - Custom vertex mesh class. Requires Vulkan buffer management, useful beyond games.
+- **BufferPool** (Phase 6) - Sub-allocation from large buffer blocks. Requires VMA knowledge.
+- **StagingPool** (Phase 6) - Reusable staging buffers with fence tracking.
+- **GraphicsPipeline conveniences** (Phase 6) - `vertexInput<T>()`, path-based shader loading, `cullBack()`/`cullFront()`/`cullNone()`.
+- **DeletionQueue** (Phase 7) - Fence-based per-frame-slot deferred deletion. Requires deep Vulkan synchronization knowledge, broadly useful for any rendering application.
 
 ---
 
