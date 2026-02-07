@@ -15,6 +15,35 @@
 namespace finevk {
 
 // ============================================================================
+// DescriptorSet implementation
+// ============================================================================
+
+DescriptorSet::~DescriptorSet() {
+    if (set_ != VK_NULL_HANDLE && pool_) {
+        pool_->free(set_);
+    }
+}
+
+DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
+    : set_(other.set_), pool_(other.pool_) {
+    other.set_ = VK_NULL_HANDLE;
+    other.pool_ = nullptr;
+}
+
+DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
+    if (this != &other) {
+        if (set_ != VK_NULL_HANDLE && pool_) {
+            pool_->free(set_);
+        }
+        set_ = other.set_;
+        pool_ = other.pool_;
+        other.set_ = VK_NULL_HANDLE;
+        other.pool_ = nullptr;
+    }
+    return *this;
+}
+
+// ============================================================================
 // DescriptorSetLayout::Builder implementation
 // ============================================================================
 
@@ -159,6 +188,7 @@ DescriptorPoolPtr DescriptorPool::Builder::build() {
     auto pool = DescriptorPoolPtr(new DescriptorPool());
     pool->device_ = device_;
     pool->pool_ = vkPool;
+    pool->allowFree_ = allowFree_;
 
     return pool;
 }
@@ -194,8 +224,10 @@ DescriptorPool::~DescriptorPool() {
 
 DescriptorPool::DescriptorPool(DescriptorPool&& other) noexcept
     : device_(other.device_)
-    , pool_(other.pool_) {
+    , pool_(other.pool_)
+    , allowFree_(other.allowFree_) {
     other.pool_ = VK_NULL_HANDLE;
+    other.allowFree_ = false;
 }
 
 DescriptorPool& DescriptorPool::operator=(DescriptorPool&& other) noexcept {
@@ -203,7 +235,9 @@ DescriptorPool& DescriptorPool::operator=(DescriptorPool&& other) noexcept {
         cleanup();
         device_ = other.device_;
         pool_ = other.pool_;
+        allowFree_ = other.allowFree_;
         other.pool_ = VK_NULL_HANDLE;
+        other.allowFree_ = false;
     }
     return *this;
 }
@@ -272,6 +306,16 @@ std::vector<VkDescriptorSet> DescriptorPool::allocate(
     }
 
     return sets;
+}
+
+DescriptorSetPtr DescriptorPool::allocateManaged(DescriptorSetLayout* layout) {
+    if (!allowFree_) {
+        throw std::runtime_error(
+            "DescriptorPool::allocateManaged: pool must be created with allowFree() "
+            "to use managed descriptor sets");
+    }
+    VkDescriptorSet raw = allocate(layout);
+    return DescriptorSetPtr(new DescriptorSet(raw, this));
 }
 
 void DescriptorPool::free(VkDescriptorSet set) {

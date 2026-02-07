@@ -15,6 +15,45 @@ class Sampler;
 class PipelineLayout;
 class CommandBuffer;
 class SimpleRenderer;
+class DescriptorPool;
+
+/**
+ * @brief RAII wrapper for a VkDescriptorSet allocated from a freeable pool
+ *
+ * On destruction, frees the set back to its pool via vkFreeDescriptorSets.
+ * Only use with pools created with allowFree() — the allocateManaged()
+ * method enforces this.
+ *
+ * The pool must outlive all DescriptorSet objects allocated from it.
+ * For deferred deletion: defer the DescriptorSet, not the pool.
+ * The pool is typically application-lifetime; individual sets are short-lived.
+ */
+class DescriptorSet {
+public:
+    ~DescriptorSet();
+
+    /// Get the raw Vulkan descriptor set handle
+    VkDescriptorSet handle() const { return set_; }
+
+    /// Get the pool this set was allocated from
+    DescriptorPool* pool() const { return pool_; }
+
+    // Non-copyable
+    DescriptorSet(const DescriptorSet&) = delete;
+    DescriptorSet& operator=(const DescriptorSet&) = delete;
+
+    // Movable
+    DescriptorSet(DescriptorSet&& other) noexcept;
+    DescriptorSet& operator=(DescriptorSet&& other) noexcept;
+
+private:
+    friend class DescriptorPool;
+    DescriptorSet(VkDescriptorSet set, DescriptorPool* pool)
+        : set_(set), pool_(pool) {}
+
+    VkDescriptorSet set_ = VK_NULL_HANDLE;
+    DescriptorPool* pool_ = nullptr;
+};
 
 /**
  * @brief Vulkan descriptor set layout wrapper
@@ -154,8 +193,17 @@ public:
     /// Allocate descriptor sets with different layouts
     std::vector<VkDescriptorSet> allocate(const std::vector<DescriptorSetLayout*>& layouts);
 
+    /// Allocate a managed descriptor set (RAII — freed on destruction)
+    /// Pool must have been created with allowFree().
+    DescriptorSetPtr allocateManaged(DescriptorSetLayout* layout);
+    DescriptorSetPtr allocateManaged(DescriptorSetLayout& layout) { return allocateManaged(&layout); }
+    DescriptorSetPtr allocateManaged(const DescriptorSetLayoutPtr& layout) { return allocateManaged(layout.get()); }
+
     /// Free a descriptor set (only if pool was created with allowFree)
     void free(VkDescriptorSet set);
+
+    /// Whether this pool supports individual set freeing
+    bool allowsFree() const { return allowFree_; }
 
     /// Reset the entire pool, freeing all sets
     void reset();
@@ -179,6 +227,7 @@ private:
 
     LogicalDevice* device_ = nullptr;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
+    bool allowFree_ = false;
 };
 
 /**

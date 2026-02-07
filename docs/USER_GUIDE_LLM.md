@@ -359,9 +359,17 @@ DescriptorPool::fromLayout(layout, maxSets)   // Auto-sizes pool from layout
     .allowFree()                               // Optional: enable individual set freeing
     .build() -> DescriptorPoolPtr
 handle() -> VkDescriptorPool
-allocate(layout) -> VkDescriptorSet
+allowsFree() -> bool                           // Whether pool supports individual set freeing
+allocate(layout) -> VkDescriptorSet            // Raw handle (freed when pool is destroyed/reset)
 allocate(layout, count) -> vector<VkDescriptorSet>
+allocateManaged(layout) -> DescriptorSetPtr    // RAII — auto-frees on destruction. Requires allowFree().
 free(VkDescriptorSet) | reset()               // free() requires allowFree()
+
+// DescriptorSet — RAII wrapper for VkDescriptorSet (from allocateManaged)
+handle() -> VkDescriptorSet
+pool() -> DescriptorPool*
+// Destructor calls pool->free(). Pool must outlive all managed sets.
+// Deferred deletion: surface->deferDelete(std::move(descriptorSet))
 
 // Writer
 DescriptorWriter(device)
@@ -995,37 +1003,38 @@ if (auto frame = renderer->beginFrame()) {
 - Each system manages its own pipeline, descriptors, and vertex/index buffers
 - Systems can accept `RenderSurface*` instead of `SimpleRenderer*` to work with both swap chain and off-screen rendering
 
-## Deferred Deletion Callback Pattern
+## Deferred Deletion for External Systems
 
-External systems (libraries, plugins) that need GPU-safe resource cleanup can accept a deletion callback instead of coupling to SimpleRenderer directly:
+External systems (libraries, plugins) that need GPU-safe resource cleanup should
+accept a `RenderSurface*` and call `deferDelete()` directly with smart pointers:
 
 ```cpp
-// External system accepts a generic callback
-using DeferDeleteFn = std::function<void(std::function<void()>)>;
-
 class ExternalRenderer {
 public:
-    void initialize(RenderPass* rp, CommandPool* cp, DeferDeleteFn deferDelete) {
-        deferDelete_ = std::move(deferDelete);
+    void initialize(RenderSurface* surface) {
+        surface_ = surface;
+        // Create a freeable pool for dynamic descriptor management
+        pool_ = DescriptorPool::fromLayout(layout_.get(), 100).allowFree().build();
     }
 
     void replaceTexture(TextureRef newTex) {
-        if (deferDelete_) {
-            deferDelete_([old = std::move(texture_)]() mutable { old.reset(); });
-        }
+        // Defer old resources — no lambdas needed
+        surface_->deferDelete(std::move(texture_));          // TextureRef (shared_ptr)
+        surface_->deferDelete(std::move(descriptorSet_));    // DescriptorSetPtr (unique_ptr)
+        // Create new resources immediately
         texture_ = std::move(newTex);
+        descriptorSet_ = pool_->allocateManaged(layout_.get());
     }
 private:
-    DeferDeleteFn deferDelete_;
+    RenderSurface* surface_;
+    DescriptorPoolPtr pool_;
+    DescriptorSetLayoutPtr layout_;
     TextureRef texture_;
+    DescriptorSetPtr descriptorSet_;   // RAII — frees back to pool on destruction
 };
-
-// Caller wires it up via SimpleRenderer (or any RenderSurface)
-externalRenderer.initialize(
-    renderer->renderPass(),
-    renderer->commandPool(),
-    [&renderer](std::function<void()> fn) { renderer->deferDelete(std::move(fn)); }
-);
 ```
 
-This avoids `device->waitIdle()` in the external system's render path while keeping it decoupled from SimpleRenderer.
+**Lifetime rule:** The `DescriptorPool` must outlive all deferred `DescriptorSetPtr`
+objects. Don't defer the pool itself — it's typically application-lifetime.
+
+This avoids `device->waitIdle()` in the external system's render path.

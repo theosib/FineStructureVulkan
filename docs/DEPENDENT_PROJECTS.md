@@ -286,9 +286,10 @@ See [MIGRATE_FINEVOX.md](MIGRATE_FINEVOX.md) for concrete code changes.
    extent, framesInFlight, currentFrame, deferDelete). Accepting the interface means
    finegui could also work with `OffscreenSurface` in the future.
 
-2. **Wire up deferDelete callback**: `GuiSystem::initialize(RenderSurface*)` should
-   capture `surface->deferDelete()` as a callback and pass it to `ImGuiBackend`.
-   The backend uses this instead of `waitIdle()` when replacing font textures.
+2. **Give ImGuiBackend a `RenderSurface*`, use managed descriptor sets**: The backend
+   should store `RenderSurface*` (not just `LogicalDevice*`) and call `deferDelete()`
+   directly with smart pointers. Use `allocateManaged()` for descriptor sets so they
+   auto-free on destruction. No callbacks or lambdas needed.
 
 3. **Use `DescriptorPool::fromLayout().allowFree()`**: Replace the hardcoded
    manual pool creation with `DescriptorPool::fromLayout(layout, maxSets).allowFree().build()`.
@@ -307,8 +308,9 @@ See [MIGRATE_FINEGUI.md](MIGRATE_FINEGUI.md) for concrete code changes.
 | `RenderSurface` interface | **Done** | SimpleRenderer and OffscreenSurface both implement it |
 | `deferDelete()` on RenderSurface | **Done** | Available on any RenderSurface, not just SimpleRenderer |
 | `DescriptorPool::fromLayout().allowFree()` | **Done** | finegui needs to use it |
+| `DescriptorSet` RAII + `allocateManaged()` | **Done** | Auto-frees back to pool on destruction |
 | Render-pass-sharing pattern docs | **Done** | Documented in `USER_GUIDE_LLM.md` |
-| Deferred deletion callback pattern docs | **Done** | Documented in `USER_GUIDE_LLM.md` |
+| Deferred deletion pattern docs | **Done** | Documented in `USER_GUIDE_LLM.md` |
 | `OffscreenSurface` for 3D-in-GUI previews | **Done** | Ready for finevox inventory UI |
 | `Material` auto frame tracking | **Done** | `Material::create(RenderSurface&)` |
 | `frame.beginRenderPass()` convenience | **Done** | On FrameBeginResult |
@@ -318,7 +320,7 @@ See [MIGRATE_FINEGUI.md](MIGRATE_FINEGUI.md) for concrete code changes.
 | Change | Priority |
 |--------|----------|
 | Accept `RenderSurface*` instead of `SimpleRenderer*` | High |
-| Wire up deferDelete callback, remove `waitIdle()` | High |
+| Give backend `RenderSurface*`, use managed descriptors, remove `waitIdle()` | High |
 | Replace manual descriptor pool with `fromLayout().allowFree()` | Medium |
 | Use `frame.beginRenderPass()` in simple_demo.cpp | Low |
 | Pre-load common glyph ranges | Low |

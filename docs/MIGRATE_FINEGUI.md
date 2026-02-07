@@ -80,68 +80,96 @@ gui.initialize(renderer.get());  // Still works — SimpleRenderer IS a RenderSu
 
 ---
 
-## 2. Wire up deferDelete, remove waitIdle() (HIGH)
+## 2. Give ImGuiBackend a `RenderSurface*`, remove waitIdle() (HIGH)
 
 The critical `waitIdle()` in `imgui_impl_finevk.cpp:211` stalls the GPU when
-font glyphs are lazily rasterized. Fix by passing a deferred deletion callback.
+font glyphs are lazily rasterized. Fix by giving the backend a `RenderSurface*`
+so it can defer resources directly — no callback indirection needed.
 
-### imgui_impl_finevk.hpp — Add callback member
+### imgui_impl_finevk.hpp — Store RenderSurface\*
 
 ```cpp
-// Add to ImGuiBackend class:
-using DeferDeleteFn = std::function<void(std::function<void()>)>;
-
-void setDeferDelete(DeferDeleteFn fn) { deferDelete_ = std::move(fn); }
-
+// OLD:
+class ImGuiBackend {
+    ImGuiBackend(finevk::LogicalDevice* device, uint32_t framesInFlight);
+    // ...
 private:
-    DeferDeleteFn deferDelete_;  // Set by GuiSystem
-```
-
-### gui_system.cpp — Pass callback during initialize
-
-```cpp
-// After creating the backend, wire up deferDelete:
-impl_->backend->setDeferDelete([surface](std::function<void()> deleter) {
-    surface->deferDelete(std::move(deleter));
-});
-```
-
-### imgui_impl_finevk.cpp — Replace waitIdle() (~line 209-211)
-
-```cpp
-// OLD (WantUpdates case):
-        // Wait for in-flight commands to finish before freeing old resources.
-        // This is infrequent (only when new glyphs are lazily rasterized).
-        device_->waitIdle();
-
-        // Destroy old texture resources
-        oldDescriptorSet = ...; // save old
-        oldTexture = ...;       // save old
-        // ... create new texture ...
+    finevk::LogicalDevice* device_;
+};
 
 // NEW:
-        // Defer old resources for GPU-safe deletion
-        if (deferDelete_) {
-            auto oldTex = std::move(texEntry.texture);
-            auto oldSet = texEntry.descriptorSet;
-            auto pool = descriptorPool_.get();
-            auto dev = device_;
-            deferDelete_([oldTex = std::move(oldTex), oldSet, pool, dev]() mutable {
-                // Free descriptor set back to pool
-                vkFreeDescriptorSets(dev->handle(), pool->handle(), 1, &oldSet);
-                oldTex.reset();  // Destroy texture
-            });
-        }
-        // ... create new texture immediately ...
+#include <finevk/rendering/render_surface.hpp>
+
+class ImGuiBackend {
+    ImGuiBackend(finevk::RenderSurface* surface);
+    // ...
+private:
+    finevk::RenderSurface* surface_;
+    finevk::LogicalDevice* device_;  // Convenience: surface_->device()
+};
 ```
 
-The `deferDelete_` callback queues the destructor to run after the GPU finishes
-the current frame slot. No stall, no hitch.
+### gui_system.cpp — Pass surface to backend
+
+```cpp
+// OLD:
+impl_->backend = std::make_unique<ImGuiBackend>(
+    surface->device(), surface->framesInFlight());
+
+// NEW:
+impl_->backend = std::make_unique<ImGuiBackend>(surface);
+```
+
+### imgui_impl_finevk.cpp — Use managed DescriptorSet + direct deferDelete
+
+Store texture descriptor sets as `DescriptorSetPtr` (RAII) instead of raw
+`VkDescriptorSet`. Then deferred deletion is just moving smart pointers:
+
+```cpp
+// Change BackendTextureData to use managed descriptor set:
+struct BackendTextureData {
+    finevk::TextureRef texture;
+    finevk::DescriptorSetPtr descriptorSet;  // Was: VkDescriptorSet
+};
+
+// Allocate with allocateManaged() instead of allocate():
+auto set = descriptorPool_->allocateManaged(descriptorLayout_.get());
+```
+
+Then the WantUpdates handler becomes simple — no lambdas, no callbacks:
+
+```cpp
+// OLD:
+        device_->waitIdle();
+        // ... manual cleanup with vkFreeDescriptorSets ...
+
+// NEW:
+        // Defer old resources for GPU-safe deletion (no stall, no lambdas)
+        surface_->deferDelete(std::move(backendTex->texture));
+        surface_->deferDelete(std::move(backendTex->descriptorSet));
+
+        // Create new texture and descriptor set immediately
+        backendTex->texture = finevk::Texture::fromMemory(...);
+        backendTex->descriptorSet = descriptorPool_->allocateManaged(...);
+```
+
+Each resource is deferred independently via its smart pointer. When the GPU
+finishes the current frame slot:
+- The `TextureRef` releases its reference (destroys texture if last ref)
+- The `DescriptorSetPtr` frees the set back to the pool (via `pool->free()`)
+
+No lambdas, no callback indirection, no `waitIdle()`.
 
 ### imgui_impl_finevk.cpp — Destructor (~line 43)
 
 The `device_->waitIdle()` in the destructor is acceptable — it only runs at
 shutdown. Keep it as-is.
+
+### Lifetime safety
+
+The `DescriptorPool` must outlive all deferred `DescriptorSetPtr` objects.
+This is naturally satisfied: the pool lives for the backend's lifetime, while
+deferred sets are destroyed within a few frames. Don't defer the pool itself.
 
 ---
 
@@ -201,6 +229,6 @@ This is cosmetic — both work. The `frame.` form is the preferred modern style.
 | Change | Files | Priority |
 |--------|-------|----------|
 | Accept `RenderSurface*` | gui_system.hpp, gui_system.cpp | High |
-| Wire up deferDelete callback | imgui_impl_finevk.hpp, imgui_impl_finevk.cpp, gui_system.cpp | High |
+| Backend `RenderSurface*` + managed descriptors | imgui_impl_finevk.hpp, imgui_impl_finevk.cpp, gui_system.cpp | High |
 | Use `fromLayout().allowFree()` | imgui_impl_finevk.cpp | Medium |
 | Use `frame.beginRenderPass()` | simple_demo.cpp | Low |
