@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
+#include <unordered_set>
 
 namespace finevk {
 
@@ -24,9 +25,10 @@ class DescriptorPool;
  * Only use with pools created with allowFree() — the allocateManaged()
  * method enforces this.
  *
- * The pool must outlive all DescriptorSet objects allocated from it.
- * For deferred deletion: defer the DescriptorSet, not the pool.
- * The pool is typically application-lifetime; individual sets are short-lived.
+ * Safe with deferred deletion: if the pool is destroyed before outstanding
+ * managed sets, it detaches them (nulls their pool pointer). The Vulkan
+ * sets are implicitly freed by vkDestroyDescriptorPool, so the detached
+ * wrappers safely no-op on destruction.
  */
 class DescriptorSet {
 public:
@@ -221,13 +223,18 @@ public:
 
 private:
     friend class Builder;
+    friend class DescriptorSet;
     DescriptorPool() = default;
 
     void cleanup();
+    void trackSet(DescriptorSet* set);
+    void untrackSet(DescriptorSet* set);
+    void detachAllSets();
 
     LogicalDevice* device_ = nullptr;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     bool allowFree_ = false;
+    std::unordered_set<DescriptorSet*> managedSets_;
 };
 
 /**

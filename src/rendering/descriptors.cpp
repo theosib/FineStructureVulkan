@@ -19,24 +19,40 @@ namespace finevk {
 // ============================================================================
 
 DescriptorSet::~DescriptorSet() {
-    if (set_ != VK_NULL_HANDLE && pool_) {
-        pool_->free(set_);
+    if (pool_) {
+        pool_->untrackSet(this);
+        if (set_ != VK_NULL_HANDLE) {
+            pool_->free(set_);
+        }
     }
 }
 
 DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
     : set_(other.set_), pool_(other.pool_) {
+    if (pool_) {
+        pool_->untrackSet(&other);
+        pool_->trackSet(this);
+    }
     other.set_ = VK_NULL_HANDLE;
     other.pool_ = nullptr;
 }
 
 DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
     if (this != &other) {
-        if (set_ != VK_NULL_HANDLE && pool_) {
-            pool_->free(set_);
+        // Clean up current state
+        if (pool_) {
+            pool_->untrackSet(this);
+            if (set_ != VK_NULL_HANDLE) {
+                pool_->free(set_);
+            }
         }
+        // Take ownership
         set_ = other.set_;
         pool_ = other.pool_;
+        if (pool_) {
+            pool_->untrackSet(&other);
+            pool_->trackSet(this);
+        }
         other.set_ = VK_NULL_HANDLE;
         other.pool_ = nullptr;
     }
@@ -219,23 +235,35 @@ DescriptorPool::Builder DescriptorPool::fromLayout(DescriptorSetLayout* layout, 
 }
 
 DescriptorPool::~DescriptorPool() {
+    detachAllSets();
     cleanup();
 }
 
 DescriptorPool::DescriptorPool(DescriptorPool&& other) noexcept
     : device_(other.device_)
     , pool_(other.pool_)
-    , allowFree_(other.allowFree_) {
+    , allowFree_(other.allowFree_)
+    , managedSets_(std::move(other.managedSets_)) {
+    // Re-point all tracked sets to this pool
+    for (auto* set : managedSets_) {
+        set->pool_ = this;
+    }
     other.pool_ = VK_NULL_HANDLE;
     other.allowFree_ = false;
 }
 
 DescriptorPool& DescriptorPool::operator=(DescriptorPool&& other) noexcept {
     if (this != &other) {
+        detachAllSets();
         cleanup();
         device_ = other.device_;
         pool_ = other.pool_;
         allowFree_ = other.allowFree_;
+        managedSets_ = std::move(other.managedSets_);
+        // Re-point all tracked sets to this pool
+        for (auto* set : managedSets_) {
+            set->pool_ = this;
+        }
         other.pool_ = VK_NULL_HANDLE;
         other.allowFree_ = false;
     }
@@ -247,6 +275,21 @@ void DescriptorPool::cleanup() {
         vkDestroyDescriptorPool(device_->handle(), pool_, nullptr);
         pool_ = VK_NULL_HANDLE;
     }
+}
+
+void DescriptorPool::trackSet(DescriptorSet* set) {
+    managedSets_.insert(set);
+}
+
+void DescriptorPool::untrackSet(DescriptorSet* set) {
+    managedSets_.erase(set);
+}
+
+void DescriptorPool::detachAllSets() {
+    for (auto* set : managedSets_) {
+        set->pool_ = nullptr;
+    }
+    managedSets_.clear();
 }
 
 VkDescriptorSet DescriptorPool::allocate(DescriptorSetLayout* layout) {
@@ -315,7 +358,9 @@ DescriptorSetPtr DescriptorPool::allocateManaged(DescriptorSetLayout* layout) {
             "to use managed descriptor sets");
     }
     VkDescriptorSet raw = allocate(layout);
-    return DescriptorSetPtr(new DescriptorSet(raw, this));
+    auto set = DescriptorSetPtr(new DescriptorSet(raw, this));
+    trackSet(set.get());
+    return set;
 }
 
 void DescriptorPool::free(VkDescriptorSet set) {
@@ -323,6 +368,7 @@ void DescriptorPool::free(VkDescriptorSet set) {
 }
 
 void DescriptorPool::reset() {
+    detachAllSets();
     vkResetDescriptorPool(device_->handle(), pool_, 0);
 }
 

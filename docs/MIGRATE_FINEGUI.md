@@ -167,9 +167,12 @@ shutdown. Keep it as-is.
 
 ### Lifetime safety
 
-The `DescriptorPool` must outlive all deferred `DescriptorSetPtr` objects.
-This is naturally satisfied: the pool lives for the backend's lifetime, while
-deferred sets are destroyed within a few frames. Don't defer the pool itself.
+Pool-invalidation makes this safe regardless of destruction order.
+If the `DescriptorPool` is destroyed before deferred `DescriptorSetPtr` objects
+are flushed, the pool automatically detaches all outstanding managed sets
+(nulls their pool pointer). `vkDestroyDescriptorPool` implicitly frees the
+Vulkan-level sets, so the detached wrappers safely no-op on destruction.
+No special ordering or per-frame retired lists needed.
 
 ---
 

@@ -411,6 +411,214 @@ void test_move_semantics() {
     std::cout << "PASSED\n";
 }
 
+void test_managed_descriptor_set() {
+    std::cout << "Testing: Managed DescriptorSet (allocateManaged)... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .allowFree()
+        .build();
+
+    // Allocate managed set
+    auto set = pool->allocateManaged(layout.get());
+    assert(set != nullptr);
+    assert(set->handle() != VK_NULL_HANDLE);
+    assert(set->pool() == pool.get());
+
+    // Set is freed back to pool on destruction (no crash = pass)
+    set.reset();
+
+    std::cout << "PASSED\n";
+}
+
+void test_managed_descriptor_set_requires_allow_free() {
+    std::cout << "Testing: allocateManaged requires allowFree... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    // Pool without allowFree
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .build();
+
+    bool threw = false;
+    try {
+        pool->allocateManaged(layout.get());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+
+    std::cout << "PASSED\n";
+}
+
+void test_pool_invalidation_pool_destroyed_first() {
+    std::cout << "Testing: Pool-invalidation (pool destroyed before sets)... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .allowFree()
+        .build();
+
+    // Allocate several managed sets
+    auto set1 = pool->allocateManaged(layout.get());
+    auto set2 = pool->allocateManaged(layout.get());
+    auto set3 = pool->allocateManaged(layout.get());
+
+    assert(set1->pool() == pool.get());
+    assert(set2->pool() == pool.get());
+    assert(set3->pool() == pool.get());
+
+    // Destroy pool FIRST — this should detach all sets
+    pool.reset();
+
+    // All sets should have null pool now
+    assert(set1->pool() == nullptr);
+    assert(set2->pool() == nullptr);
+    assert(set3->pool() == nullptr);
+
+    // Destroying the detached sets should NOT crash (no-op, no vkFreeDescriptorSets)
+    set1.reset();
+    set2.reset();
+    set3.reset();
+
+    std::cout << "PASSED\n";
+}
+
+void test_pool_invalidation_mixed_destruction() {
+    std::cout << "Testing: Pool-invalidation (mixed destruction order)... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .allowFree()
+        .build();
+
+    auto set1 = pool->allocateManaged(layout.get());
+    auto set2 = pool->allocateManaged(layout.get());
+    auto set3 = pool->allocateManaged(layout.get());
+
+    // Destroy set1 while pool is alive — should free back to pool normally
+    set1.reset();
+
+    // Destroy pool — should detach set2 and set3
+    pool.reset();
+
+    assert(set2->pool() == nullptr);
+    assert(set3->pool() == nullptr);
+
+    // Destroy remaining sets — should no-op safely
+    set2.reset();
+    set3.reset();
+
+    std::cout << "PASSED\n";
+}
+
+void test_pool_invalidation_with_move() {
+    std::cout << "Testing: Pool-invalidation (set move tracking)... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .allowFree()
+        .build();
+
+    auto set1 = pool->allocateManaged(layout.get());
+    VkDescriptorSet rawHandle = set1->handle();
+
+    // Move set1 into set2 — tracking should follow
+    auto set2 = std::move(set1);
+    assert(set2->handle() == rawHandle);
+    assert(set2->pool() == pool.get());
+
+    // Destroy pool — should detach the moved set
+    pool.reset();
+    assert(set2->pool() == nullptr);
+
+    // Destroy moved set — should no-op safely
+    set2.reset();
+
+    std::cout << "PASSED\n";
+}
+
+void test_pool_reset_detaches_sets() {
+    std::cout << "Testing: Pool reset detaches managed sets... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto pool = DescriptorPool::create(ctx.logicalDevice.get())
+        .maxSets(10)
+        .poolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10)
+        .allowFree()
+        .build();
+
+    auto set1 = pool->allocateManaged(layout.get());
+    auto set2 = pool->allocateManaged(layout.get());
+
+    // Reset pool — should detach all managed sets
+    pool->reset();
+
+    assert(set1->pool() == nullptr);
+    assert(set2->pool() == nullptr);
+
+    // Sets should no-op on destruction (Vulkan sets already freed by reset)
+    set1.reset();
+    set2.reset();
+
+    // Pool should still be usable after reset
+    auto set3 = pool->allocateManaged(layout.get());
+    assert(set3 != nullptr);
+    assert(set3->pool() == pool.get());
+
+    std::cout << "PASSED\n";
+}
+
+void test_from_layout_pool() {
+    std::cout << "Testing: DescriptorPool::fromLayout()... ";
+
+    auto layout = DescriptorSetLayout::create(ctx.logicalDevice.get())
+        .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .combinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto pool = DescriptorPool::fromLayout(layout.get(), 10)
+        .allowFree()
+        .build();
+
+    assert(pool != nullptr);
+    assert(pool->allowsFree());
+
+    // Should be able to allocate sets from it
+    auto set = pool->allocateManaged(layout.get());
+    assert(set != nullptr);
+    assert(set->handle() != VK_NULL_HANDLE);
+
+    std::cout << "PASSED\n";
+}
+
 int main() {
     std::cout << "\n========================================\n";
     std::cout << "FineStructure Vulkan - Phase 3 Tests\n";
@@ -461,6 +669,15 @@ int main() {
         test_descriptor_pool();
         test_descriptor_allocation();
         test_descriptor_writer();
+
+        // Managed descriptor set & pool-invalidation tests
+        test_managed_descriptor_set();
+        test_managed_descriptor_set_requires_allow_free();
+        test_pool_invalidation_pool_destroyed_first();
+        test_pool_invalidation_mixed_destruction();
+        test_pool_invalidation_with_move();
+        test_pool_reset_detaches_sets();
+        test_from_layout_pool();
 
         // Move semantics
         test_move_semantics();

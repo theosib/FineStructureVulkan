@@ -368,7 +368,9 @@ free(VkDescriptorSet) | reset()               // free() requires allowFree()
 // DescriptorSet — RAII wrapper for VkDescriptorSet (from allocateManaged)
 handle() -> VkDescriptorSet
 pool() -> DescriptorPool*
-// Destructor calls pool->free(). Pool must outlive all managed sets.
+// Destructor calls pool->free() if pool is still alive. Pool-invalidation:
+// if pool is destroyed first, all outstanding managed sets are detached
+// (pool_ nulled). Safe with deferred deletion regardless of destruction order.
 // Deferred deletion: surface->deferDelete(std::move(descriptorSet))
 
 // Writer
@@ -1034,7 +1036,9 @@ private:
 };
 ```
 
-**Lifetime rule:** The `DescriptorPool` must outlive all deferred `DescriptorSetPtr`
-objects. Don't defer the pool itself — it's typically application-lifetime.
+**Lifetime safety:** Pool-invalidation makes `deferDelete` safe regardless of
+destruction order. If the pool dies before deferred sets are flushed, it detaches
+them automatically — the Vulkan sets are implicitly freed by `vkDestroyDescriptorPool`,
+so the detached wrappers no-op on destruction. No special ordering needed.
 
 This avoids `device->waitIdle()` in the external system's render path.

@@ -308,7 +308,7 @@ See [MIGRATE_FINEGUI.md](MIGRATE_FINEGUI.md) for concrete code changes.
 | `RenderSurface` interface | **Done** | SimpleRenderer and OffscreenSurface both implement it |
 | `deferDelete()` on RenderSurface | **Done** | Available on any RenderSurface, not just SimpleRenderer |
 | `DescriptorPool::fromLayout().allowFree()` | **Done** | finegui needs to use it |
-| `DescriptorSet` RAII + `allocateManaged()` | **Done** | Auto-frees back to pool on destruction |
+| `DescriptorSet` RAII + `allocateManaged()` | **Done** | Auto-frees back to pool; pool-invalidation makes deferred deletion safe regardless of destruction order |
 | Render-pass-sharing pattern docs | **Done** | Documented in `USER_GUIDE_LLM.md` |
 | Deferred deletion pattern docs | **Done** | Documented in `USER_GUIDE_LLM.md` |
 | `OffscreenSurface` for 3D-in-GUI previews | **Done** | Ready for finevox inventory UI |
