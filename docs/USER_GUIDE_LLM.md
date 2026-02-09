@@ -26,6 +26,7 @@ Errors:     Throws std::runtime_error on failure
 - Hardcode depth format (`VK_FORMAT_D32_SFLOAT`) — use `DeviceCapabilities::selectDepthFormat()` or `RenderTarget::enableDepth()`
 - Wrap `VkFormat`, `VkExtent2D`, or GLFW key codes — these are data, not mechanics
 - Use legacy APIs (`fromFile`, `fromMemory`, `loadOBJ`, `fromOBJ`) — use `Texture::load()` / `Mesh::load()` builders
+- Manually add `VK_KHR_swapchain` extension — it's auto-added when `.surface()` is called on LogicalDeviceBuilder
 - Set pipeline `samples()` without matching the render pass — use `renderer->msaaSamples()`
 - Manually write descriptor sets per frame — use `Material` for automatic per-frame management
 - Create a separate render pass for overlay/GUI rendering — share SimpleRenderer's render pass instead
@@ -39,17 +40,24 @@ Errors:     Throws std::runtime_error on failure
 - Use `fromLayout().allowFree()` when descriptors are allocated/freed dynamically
 - Match pipeline `samples()` to `renderer->msaaSamples()`
 - Share `renderer->renderPass()` across multiple rendering systems (world, overlay, GUI)
+- Use `Instance::create().headless()` for offscreen-only apps (no GLFW dependency at runtime)
 
 ## Setup Chain
 
 ```cpp
-// Instance -> Window -> PhysicalDevice -> LogicalDevice -> bind -> Renderer
+// Windowed: Instance -> Window -> PhysicalDevice -> LogicalDevice -> bind -> Renderer
 auto instance = Instance::create().applicationName("App").enableValidation().build();
 auto window = Window::create(instance).title("App").size(1280, 720).build();
 auto gpu = PhysicalDevice::selectBest(instance, window->surface());
 auto device = gpu.createLogicalDevice().surface(window->surface()).build();
 window->bindDevice(device);  // Creates swap chain + sync objects
 auto renderer = SimpleRenderer::create(window);
+
+// Headless: Instance -> PhysicalDevice -> LogicalDevice -> OffscreenSurface
+auto instance = Instance::create().applicationName("App").headless().build();
+auto gpu = instance->selectPhysicalDevice();  // No surface needed
+auto device = gpu.createLogicalDevice().build();  // No .surface(), no swapchain ext
+auto surface = OffscreenSurface::create(device).extent(512, 512).enableDepth().build();
 ```
 
 ## Core
@@ -61,11 +69,13 @@ Instance::create()
     .applicationName(string)
     .applicationVersion(major, minor, patch)
     .enableValidation()
+    .headless()              // Skip GLFW init + surface extensions (for offscreen-only)
     .addExtension(name)
     .build() -> InstancePtr
 
 handle() -> VkInstance
-createSurface(GLFWwindow*) -> SurfacePtr
+isHeadless() -> bool
+createSurface(GLFWwindow*) -> SurfacePtr  // Not available in headless mode
 ```
 
 ### PhysicalDevice
@@ -96,8 +106,9 @@ LogicalDeviceBuilder
     .enableFeature(lambda(VkPhysicalDeviceFeatures&))
     .enableAnisotropy()
     .enableSampleRateShading()
-    .surface(surface)
+    .surface(surface)            // Automatically adds VK_KHR_swapchain when set
     .build() -> LogicalDevicePtr
+// Omit .surface() for headless — no swapchain extension, no present queue
 
 handle() -> VkDevice
 physicalDevice() -> PhysicalDevice*
@@ -401,6 +412,7 @@ RenderTarget::create(device)
     .depthFormat(VkFormat)            // Specific depth format
     .depthAttachment(image)           // Use existing depth buffer
     .msaa(VkSampleCountFlagBits)     // Full MSAA with resolve attachments
+    .finalLayout(VkImageLayout)       // Override color attachment final layout
     .build() -> RenderTargetPtr
 
 renderPass() -> RenderPass*
@@ -415,6 +427,7 @@ recreate(DeletionQueue* dq?)  // dq != nullptr: frame-safe deferred cleanup
 // msaa() creates MSAA color image + resolve attachment automatically.
 // Window targets auto-resize in begin() — no manual recreate needed.
 // recreate() with DeletionQueue defers old framebuffers/images (render pass preserved).
+// finalLayout defaults: PRESENT_SRC_KHR (window), SHADER_READ_ONLY_OPTIMAL (offscreen).
 ```
 
 ### Sync
@@ -494,6 +507,7 @@ endFrame()         // Submits command buffer with fence
 // Result access
 colorImage() -> Image*          // The rendered image
 colorImageView() -> ImageView*  // For descriptor set binding
+colorSampler() -> Sampler*      // Lazy-created linear + clamp-to-edge sampler
 currentCommandBuffer() -> CommandBuffer*
 
 // Resize

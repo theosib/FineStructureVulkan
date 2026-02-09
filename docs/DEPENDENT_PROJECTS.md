@@ -245,8 +245,15 @@ itemModel->render(preview->currentCommandBuffer());
 preview->endRenderPass();
 preview->endFrame();
 
-// Register preview->colorImageView() with finegui for ImGui::Image()
+// Register with finegui using the lazy-created sampler:
+auto handle = gui.registerTexture(preview->colorImageView(), preview->colorSampler());
+ImGui::Image(handle, ImVec2(128, 128));
 ```
+
+The `colorSampler()` creates a linear/clamp-to-edge sampler on first access and caches it.
+The render target's final layout defaults to `SHADER_READ_ONLY_OPTIMAL` for offscreen surfaces,
+so the image is ready for sampling immediately after `endFrame()` (same-queue ordering guarantees
+both execution and memory visibility).
 
 ### What FineVK Needs to Change
 
@@ -314,6 +321,7 @@ See [MIGRATE_FINEGUI.md](MIGRATE_FINEGUI.md) for concrete code changes.
 | `OffscreenSurface` for 3D-in-GUI previews | **Done** | Ready for finevox inventory UI |
 | `Material` auto frame tracking | **Done** | `Material::create(RenderSurface&)` |
 | `frame.beginRenderPass()` convenience | **Done** | On FrameBeginResult |
+| Headless device creation | **Done** | `Instance::create().headless()` skips GLFW; swapchain extension auto-added only when `.surface()` set |
 
 ## Remaining Work (finegui-side)
 
@@ -321,6 +329,7 @@ See [MIGRATE_FINEGUI.md](MIGRATE_FINEGUI.md) for concrete code changes.
 |--------|----------|
 | Accept `RenderSurface*` instead of `SimpleRenderer*` | High |
 | Give backend `RenderSurface*`, use managed descriptors, remove `waitIdle()` | High |
+| Add `registerTexture(ImageView*, Sampler*)` overload for offscreen surfaces | High |
 | Replace manual descriptor pool with `fromLayout().allowFree()` | Medium |
 | Use `frame.beginRenderPass()` in simple_demo.cpp | Low |
 | Pre-load common glyph ranges | Low |

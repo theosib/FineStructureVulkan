@@ -65,6 +65,11 @@ RenderTarget::Builder& RenderTarget::Builder::msaa(VkSampleCountFlagBits samples
     return *this;
 }
 
+RenderTarget::Builder& RenderTarget::Builder::finalLayout(VkImageLayout layout) {
+    finalLayout_ = layout;
+    return *this;
+}
+
 RenderTargetPtr RenderTarget::Builder::build() {
     if (!window_ && !colorImage_) {
         throw std::runtime_error("RenderTarget requires either a window or color attachment");
@@ -76,6 +81,15 @@ RenderTargetPtr RenderTarget::Builder::build() {
     target->colorImage_ = colorImage_;
     target->msaaSamples_ = msaaSamples_;
     target->depthFormat_ = enableDepth_ ? depthFormat_ : VK_FORMAT_UNDEFINED;
+
+    // Resolve final layout: explicit > auto-detect
+    if (finalLayout_ != VK_IMAGE_LAYOUT_UNDEFINED) {
+        target->finalLayout_ = finalLayout_;
+    } else if (window_) {
+        target->finalLayout_ = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    } else {
+        target->finalLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
 
     // Determine extent and color format
     if (window_) {
@@ -145,6 +159,7 @@ RenderTarget::RenderTarget(RenderTarget&& other) noexcept
     , colorFormat_(other.colorFormat_)
     , depthFormat_(other.depthFormat_)
     , msaaSamples_(other.msaaSamples_)
+    , finalLayout_(other.finalLayout_)
     , resizeCallbackId_(other.resizeCallbackId_) {
     other.device_ = nullptr;
     other.window_ = nullptr;
@@ -166,6 +181,7 @@ RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept {
         colorFormat_ = other.colorFormat_;
         depthFormat_ = other.depthFormat_;
         msaaSamples_ = other.msaaSamples_;
+        finalLayout_ = other.finalLayout_;
         resizeCallbackId_ = other.resizeCallbackId_;
         other.device_ = nullptr;
         other.window_ = nullptr;
@@ -302,10 +318,6 @@ void RenderTarget::recreate(DeletionQueue* dq) {
 }
 
 void RenderTarget::createRenderPass() {
-    VkImageLayout finalLayout = window_ ?
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR :
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
     if (msaaSamples_ != VK_SAMPLE_COUNT_1_BIT) {
         // MSAA: multisampled color -> resolve to single-sampled target
         auto builder = RenderPass::create(device_);
@@ -326,7 +338,7 @@ void RenderTarget::createRenderPass() {
         }
 
         // Last attachment: Resolve target (single-sampled)
-        builder.addResolveAttachment(colorFormat_, finalLayout);
+        builder.addResolveAttachment(colorFormat_, finalLayout_);
         builder.subpassResolveAttachment(nextAttachment);
 
         if (window_) {
@@ -341,7 +353,7 @@ void RenderTarget::createRenderPass() {
         builder.addColorAttachment(
             colorFormat_, VK_SAMPLE_COUNT_1_BIT,
             VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-            VK_IMAGE_LAYOUT_UNDEFINED, finalLayout);
+            VK_IMAGE_LAYOUT_UNDEFINED, finalLayout_);
         builder.subpassColorAttachment(0);
 
         if (hasDepth()) {

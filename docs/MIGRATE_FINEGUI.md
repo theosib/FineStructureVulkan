@@ -199,7 +199,61 @@ No special ordering or per-frame retired lists needed.
 
 ---
 
-## 4. Use `frame.beginRenderPass()` in simple_demo.cpp (LOW)
+## 4. Add `registerTexture(ImageView*, Sampler*)` overload (HIGH)
+
+finegui currently only accepts `Texture*` for texture registration. To support
+offscreen surface results (which are `ImageView*` + `Sampler*`, not `Texture*`),
+add an overload that works with raw image views.
+
+### gui_system.hpp
+
+```cpp
+// EXISTING:
+TextureHandle registerTexture(finevk::Texture* texture, finevk::Sampler* sampler);
+
+// ADD:
+TextureHandle registerTexture(finevk::ImageView* view, finevk::Sampler* sampler);
+```
+
+### gui_system.cpp
+
+```cpp
+TextureHandle GuiSystem::registerTexture(finevk::ImageView* view, finevk::Sampler* sampler) {
+    if (!view || !sampler) {
+        throw std::runtime_error("registerTexture: view and sampler cannot be null");
+    }
+    return impl_->backend->registerTexture(view->handle(), sampler->handle());
+}
+```
+
+### imgui_impl_finevk.cpp
+
+The backend already has `allocateTextureDescriptor(VkImageView, VkSampler)` internally.
+Add a public `registerTexture(VkImageView, VkSampler)` that creates a TextureEntry
+without a Texture pointer (for externally-managed images like offscreen results):
+
+```cpp
+TextureHandle ImGuiBackend::registerTexture(VkImageView view, VkSampler sampler) {
+    TextureEntry entry;
+    entry.descriptorSet = allocateTextureDescriptor(view, sampler);
+    entry.isExternal = true;  // Not managed by ImGui lifecycle
+    // ... assign handle ID, store in map ...
+    return handle;
+}
+```
+
+### Usage with OffscreenSurface
+
+```cpp
+auto preview = OffscreenSurface::create(device).extent(128, 128).enableDepth().build();
+// ... render to preview ...
+auto handle = gui.registerTexture(preview->colorImageView(), preview->colorSampler());
+ImGui::Image(handle, ImVec2(128, 128));
+```
+
+---
+
+## 5. Use `frame.beginRenderPass()` in simple_demo.cpp (LOW)
 
 ### examples/simple_demo.cpp (~line 114)
 
@@ -233,5 +287,6 @@ This is cosmetic — both work. The `frame.` form is the preferred modern style.
 |--------|-------|----------|
 | Accept `RenderSurface*` | gui_system.hpp, gui_system.cpp | High |
 | Backend `RenderSurface*` + managed descriptors | imgui_impl_finevk.hpp, imgui_impl_finevk.cpp, gui_system.cpp | High |
+| `registerTexture(ImageView*, Sampler*)` overload | gui_system.hpp, gui_system.cpp, imgui_impl_finevk.cpp | High |
 | Use `fromLayout().allowFree()` | imgui_impl_finevk.cpp | Medium |
 | Use `frame.beginRenderPass()` | simple_demo.cpp | Low |

@@ -1,6 +1,7 @@
 #include "finevk/rendering/offscreen_surface.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/image.hpp"
+#include "finevk/device/sampler.hpp"
 #include "finevk/device/command.hpp"
 #include "finevk/rendering/sync.hpp"
 #include "finevk/core/logging.hpp"
@@ -65,7 +66,7 @@ std::unique_ptr<OffscreenSurface> OffscreenSurface::Builder::build() {
 
     // Create command buffer and fence
     surface->commandBuffer_ = surface->commandPool_->allocate();
-    surface->fence_ = std::make_unique<Fence>(device_, true);  // Start signaled
+    surface->fence_ = std::make_unique<Fence>(device_, false);  // Start unsignaled; hasSubmitted_ skips first wait
 
     FINEVK_DEBUG(LogCategory::Render, "OffscreenSurface created: " +
         std::to_string(width_) + "x" + std::to_string(height_));
@@ -99,7 +100,8 @@ OffscreenSurface::OffscreenSurface(OffscreenSurface&& other) noexcept
     , commandBuffer_(std::move(other.commandBuffer_))
     , fence_(std::move(other.fence_))
     , hasSubmitted_(other.hasSubmitted_)
-    , deletionQueue_(std::move(other.deletionQueue_)) {
+    , deletionQueue_(std::move(other.deletionQueue_))
+    , sampler_(std::move(other.sampler_)) {
     other.device_ = nullptr;
     other.commandPool_ = nullptr;
     other.hasSubmitted_ = false;
@@ -121,6 +123,7 @@ OffscreenSurface& OffscreenSurface::operator=(OffscreenSurface&& other) noexcept
         fence_ = std::move(other.fence_);
         hasSubmitted_ = other.hasSubmitted_;
         deletionQueue_ = std::move(other.deletionQueue_);
+        sampler_ = std::move(other.sampler_);
 
         other.device_ = nullptr;
         other.commandPool_ = nullptr;
@@ -174,10 +177,21 @@ ImageView* OffscreenSurface::colorImageView() const {
     return colorImage_ ? colorImage_->view() : nullptr;
 }
 
+Sampler* OffscreenSurface::colorSampler() const {
+    if (!sampler_ && device_) {
+        sampler_ = Sampler::create(device_)
+            .filter(VK_FILTER_LINEAR)
+            .addressMode(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+            .build();
+    }
+    return sampler_.get();
+}
+
 void OffscreenSurface::resize(uint32_t width, uint32_t height) {
-    // Wait for any in-flight work
+    // Wait for any in-flight work and reset fence for next submit
     if (hasSubmitted_) {
         fence_->wait();
+        fence_->reset();
         hasSubmitted_ = false;
     }
 

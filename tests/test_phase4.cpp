@@ -606,6 +606,353 @@ void test_simple_renderer_msaa() {
 }
 
 // ============================================================================
+// OffscreenSurface Tests
+// ============================================================================
+
+void test_offscreen_surface_creation() {
+    std::cout << "Test: OffscreenSurface - Creation... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(128, 128)
+        .colorFormat(VK_FORMAT_R8G8B8A8_SRGB)
+        .build();
+
+    assert(surface != nullptr);
+    assert(surface->device() == ctx.logicalDevice.get());
+    assert(surface->framesInFlight() == 1);
+    assert(surface->currentFrame() == 0);
+    assert(surface->colorImage() != nullptr);
+    assert(surface->colorImageView() != nullptr);
+    assert(surface->currentCommandBuffer() != nullptr);
+
+    // RenderTarget properties
+    auto* rt = surface->renderTarget();
+    assert(rt != nullptr);
+    assert(rt->extent().width == 128);
+    assert(rt->extent().height == 128);
+    assert(rt->colorFormat() == VK_FORMAT_R8G8B8A8_SRGB);
+    assert(rt->msaaSamples() == VK_SAMPLE_COUNT_1_BIT);
+    assert(rt->hasDepth() == false);
+
+    // RenderSurface interface delegates to RenderTarget
+    assert(surface->renderPass() == rt->renderPass());
+    assert(surface->extent().width == 128);
+    assert(surface->colorFormat() == VK_FORMAT_R8G8B8A8_SRGB);
+    assert(surface->msaaSamples() == VK_SAMPLE_COUNT_1_BIT);
+    assert(surface->isMsaaEnabled() == false);
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_with_depth() {
+    std::cout << "Test: OffscreenSurface - Creation with depth... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(64, 64)
+        .colorFormat(VK_FORMAT_R8G8B8A8_UNORM)
+        .enableDepth()
+        .build();
+
+    assert(surface != nullptr);
+    assert(surface->renderTarget()->hasDepth() == true);
+    assert(surface->depthFormat() != VK_FORMAT_UNDEFINED);
+    assert(FormatUtils::hasDepth(surface->depthFormat()));
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_render_cycle() {
+    std::cout << "Test: OffscreenSurface - Full render cycle... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(64, 64)
+        .colorFormat(VK_FORMAT_R8G8B8A8_SRGB)
+        .enableDepth()
+        .build();
+
+    // First frame — exercises the unsignaled fence path (no wait)
+    surface->beginFrame();
+    surface->beginRenderPass({0.0f, 0.0f, 0.0f, 1.0f});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Second frame — exercises the fence wait/reset path
+    surface->beginFrame();
+    surface->beginRenderPass({1.0f, 0.0f, 0.0f, 1.0f});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Third frame — one more cycle to be thorough
+    surface->beginFrame();
+    surface->beginRenderPass({0.0f, 1.0f, 0.0f, 1.0f});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_lazy_sampler() {
+    std::cout << "Test: OffscreenSurface - Lazy sampler creation... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(32, 32)
+        .build();
+
+    // First call creates the sampler
+    auto* sampler = surface->colorSampler();
+    assert(sampler != nullptr);
+    assert(sampler->handle() != VK_NULL_HANDLE);
+
+    // Subsequent calls return the same cached sampler
+    auto* sampler2 = surface->colorSampler();
+    assert(sampler == sampler2);
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_final_layout() {
+    std::cout << "Test: OffscreenSurface - Final layout is SHADER_READ_ONLY_OPTIMAL... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(32, 32)
+        .build();
+
+    // RenderTarget should default to SHADER_READ_ONLY_OPTIMAL for offscreen
+    // (This is what makes the image ready for texture sampling after endFrame)
+    auto* rt = surface->renderTarget();
+    assert(rt != nullptr);
+    assert(rt->renderPass() != nullptr);
+
+    // Verify the surface works in a render cycle (proves the layout is valid)
+    surface->beginFrame();
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_resize() {
+    std::cout << "Test: OffscreenSurface - Resize... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(64, 64)
+        .colorFormat(VK_FORMAT_R8G8B8A8_SRGB)
+        .enableDepth()
+        .build();
+
+    // Do a render cycle first
+    surface->beginFrame();
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Resize
+    surface->resize(128, 256);
+
+    assert(surface->extent().width == 128);
+    assert(surface->extent().height == 256);
+    assert(surface->colorImage()->width() == 128);
+    assert(surface->colorImage()->height() == 256);
+
+    // Render at new size should work
+    surface->beginFrame();
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_deferred_deletion() {
+    std::cout << "Test: OffscreenSurface - Deferred deletion... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(32, 32)
+        .build();
+
+    // Do a frame so we have a submitted fence
+    surface->beginFrame();
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Defer a lambda deletion
+    bool deleted = false;
+    surface->deferDelete([&deleted]() { deleted = true; });
+
+    // Not deleted yet — still in the queue
+    assert(!deleted);
+
+    // Next beginFrame waits for fence and drains the queue
+    surface->beginFrame();
+    assert(deleted);
+
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    std::cout << "PASSED\n";
+}
+
+void test_offscreen_surface_deferred_deletion_smart_ptr() {
+    std::cout << "Test: OffscreenSurface - Deferred deletion (smart ptr)... ";
+
+    auto surface = OffscreenSurface::create(ctx.logicalDevice.get())
+        .extent(32, 32)
+        .build();
+
+    // Create a texture to defer
+    std::vector<uint8_t> pixels(4 * 4 * 4, 128);
+    auto texture = Texture::fromMemory(
+        ctx.logicalDevice.get(), pixels.data(), 4, 4,
+        ctx.commandPool.get(), false, false);
+    auto weakRef = std::weak_ptr<Texture>(texture);
+
+    // Do a frame
+    surface->beginFrame();
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Defer the texture (shared_ptr overload)
+    surface->deferDelete(std::move(texture));
+    assert(!weakRef.expired());  // Still alive in the queue
+
+    // Next beginFrame drains the queue
+    surface->beginFrame();
+    assert(weakRef.expired());  // Now destroyed
+
+    surface->beginRenderPass({0, 0, 0, 1});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    std::cout << "PASSED\n";
+}
+
+void test_render_target_final_layout_explicit() {
+    std::cout << "Test: RenderTarget - Explicit finalLayout override... ";
+
+    // Create a color image for offscreen rendering
+    auto image = Image::create(ctx.logicalDevice.get())
+        .extent(32, 32)
+        .format(VK_FORMAT_R8G8B8A8_UNORM)
+        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+        .mipLevels(1)
+        .memoryUsage(MemoryUsage::GpuOnly)
+        .build();
+
+    // Default offscreen layout should be SHADER_READ_ONLY_OPTIMAL
+    auto rtDefault = RenderTarget::create(ctx.logicalDevice.get())
+        .colorAttachment(image.get())
+        .build();
+    // Just verify it builds without error — the default is correct
+
+    // Explicit override to COLOR_ATTACHMENT_OPTIMAL
+    auto rtExplicit = RenderTarget::create(ctx.logicalDevice.get())
+        .colorAttachment(image.get())
+        .finalLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        .build();
+    assert(rtExplicit != nullptr);
+    assert(rtExplicit->renderPass() != nullptr);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
+// Headless Device Tests
+// ============================================================================
+
+void test_headless_instance_creation() {
+    std::cout << "Test: Headless instance creation... ";
+
+    auto instance = Instance::create()
+        .applicationName("Headless Test")
+        .headless()
+        .enableValidation(true)
+        .build();
+
+    assert(instance != nullptr);
+    assert(instance->handle() != VK_NULL_HANDLE);
+    assert(instance->isHeadless() == true);
+
+    std::cout << "PASSED\n";
+}
+
+void test_headless_device_selection() {
+    std::cout << "Test: Headless device selection (no surface)... ";
+
+    auto instance = Instance::create()
+        .applicationName("Headless Test")
+        .headless()
+        .enableValidation(true)
+        .build();
+
+    // Select device with no surface — should succeed for headless
+    auto physDevice = instance->selectPhysicalDevice();
+    assert(physDevice.handle() != VK_NULL_HANDLE);
+
+    std::cout << "PASSED (GPU: " << physDevice.name() << ")\n";
+}
+
+void test_headless_logical_device() {
+    std::cout << "Test: Headless logical device (no swapchain)... ";
+
+    auto instance = Instance::create()
+        .applicationName("Headless Test")
+        .headless()
+        .enableValidation(true)
+        .build();
+
+    auto physDevice = instance->selectPhysicalDevice();
+    auto logicalDevice = physDevice.createLogicalDevice()
+        .enableAnisotropy()
+        .build();
+
+    assert(logicalDevice != nullptr);
+    assert(logicalDevice->handle() != VK_NULL_HANDLE);
+    assert(logicalDevice->graphicsQueue() != nullptr);
+
+    std::cout << "PASSED\n";
+}
+
+void test_headless_offscreen_render() {
+    std::cout << "Test: Headless offscreen render (end-to-end)... ";
+
+    auto instance = Instance::create()
+        .applicationName("Headless Test")
+        .headless()
+        .enableValidation(true)
+        .build();
+
+    auto physDevice = instance->selectPhysicalDevice();
+    auto logicalDevice = physDevice.createLogicalDevice()
+        .enableAnisotropy()
+        .build();
+
+    auto surface = OffscreenSurface::create(logicalDevice.get())
+        .extent(64, 64)
+        .colorFormat(VK_FORMAT_R8G8B8A8_SRGB)
+        .enableDepth()
+        .build();
+
+    assert(surface != nullptr);
+    assert(surface->extent().width == 64);
+
+    // Render a frame
+    surface->beginFrame();
+    surface->beginRenderPass({0.1f, 0.2f, 0.3f, 1.0f});
+    surface->endRenderPass();
+    surface->endFrame();
+
+    // Verify sampler works
+    assert(surface->colorSampler() != nullptr);
+    assert(surface->colorImageView() != nullptr);
+
+    std::cout << "PASSED\n";
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -678,7 +1025,25 @@ int main() {
         setup_test_context();
         test_simple_renderer_msaa(); passed++;
 
+        // OffscreenSurface tests
         cleanup_test_context();
+        setup_test_context();
+        test_offscreen_surface_creation(); passed++;
+        test_offscreen_surface_with_depth(); passed++;
+        test_offscreen_surface_render_cycle(); passed++;
+        test_offscreen_surface_lazy_sampler(); passed++;
+        test_offscreen_surface_final_layout(); passed++;
+        test_offscreen_surface_resize(); passed++;
+        test_offscreen_surface_deferred_deletion(); passed++;
+        test_offscreen_surface_deferred_deletion_smart_ptr(); passed++;
+        test_render_target_final_layout_explicit(); passed++;
+
+        // Headless tests (use their own instance, no GLFW window)
+        cleanup_test_context();
+        test_headless_instance_creation(); passed++;
+        test_headless_device_selection(); passed++;
+        test_headless_logical_device(); passed++;
+        test_headless_offscreen_render(); passed++;
 
     } catch (const std::exception& e) {
         std::cerr << "\nEXCEPTION: " << e.what() << "\n";

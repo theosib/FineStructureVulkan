@@ -298,7 +298,7 @@ PhysicalDevice PhysicalDevice::selectBest(
             continue; // Must have graphics queue
         }
 
-        // If surface provided, must support presentation
+        // If surface provided, must support presentation and swapchain
         if (surface) {
             auto presentFamily = device.capabilities().presentQueueFamily(
                 device.handle(), vkSurface);
@@ -307,15 +307,14 @@ PhysicalDevice PhysicalDevice::selectBest(
             }
 
             // Check swap chain support
+            if (!device.capabilities().supportsExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+                continue;
+            }
+
             auto swapChainSupport = device.querySwapChainSupport(vkSurface);
             if (!swapChainSupport.isAdequate()) {
                 continue;
             }
-        }
-
-        // Check for required extensions
-        if (!device.capabilities().supportsExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
-            continue;
         }
 
         // Score the device
@@ -371,9 +370,6 @@ LogicalDeviceBuilder PhysicalDevice::createLogicalDevice() {
 
 LogicalDeviceBuilder::LogicalDeviceBuilder(PhysicalDevice* physical)
     : physical_(physical) {
-    // Always require swapchain extension
-    extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-
 #ifdef VK_USE_PLATFORM_MACOS_MVK
     // MoltenVK portability subset
     if (physical_->capabilities().supportsExtension("VK_KHR_portability_subset")) {

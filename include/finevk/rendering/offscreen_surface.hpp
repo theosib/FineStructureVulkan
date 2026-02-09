@@ -16,6 +16,7 @@ class CommandBuffer;
 class Fence;
 class Image;
 class ImageView;
+class Sampler;
 
 /**
  * @brief Off-screen render surface for rendering to a texture
@@ -120,6 +121,9 @@ public:
     /// Get the color image view (for use in descriptor sets)
     ImageView* colorImageView() const;
 
+    /// Get a sampler for the color image (lazy-created, linear + clamp-to-edge)
+    Sampler* colorSampler() const;
+
     /// Get the command buffer (for recording additional commands between begin/end frame)
     CommandBuffer* currentCommandBuffer() const { return commandBuffer_.get(); }
 
@@ -165,6 +169,9 @@ private:
 
     // Deferred deletion (single-buffered)
     DeletionQueue deletionQueue_;
+
+    // Lazy-created sampler for texture sampling
+    mutable SamplerPtr sampler_;
 };
 
 /**

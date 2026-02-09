@@ -202,6 +202,7 @@ private:
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
+    VkImageLayout finalLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // Window resize callback ID (for cleanup)
     size_t resizeCallbackId_ = 0;
@@ -243,6 +244,10 @@ public:
     /// Set MSAA sample count
     Builder& msaa(VkSampleCountFlagBits samples);
 
+    /// Set the final image layout for the color attachment after the render pass.
+    /// Default: PRESENT_SRC_KHR for window targets, SHADER_READ_ONLY_OPTIMAL for offscreen.
+    Builder& finalLayout(VkImageLayout layout);
+
     /// Build the render target
     RenderTargetPtr build();
 
@@ -253,6 +258,7 @@ private:
     Image* depthImage_ = nullptr;
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
+    VkImageLayout finalLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;  // UNDEFINED = auto-detect
     bool enableDepth_ = false;
 };
 

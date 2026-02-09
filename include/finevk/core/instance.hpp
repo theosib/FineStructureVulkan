@@ -66,6 +66,10 @@ public:
         /// Add multiple instance extensions
         Builder& addExtensions(const std::vector<const char*>& extensions);
 
+        /// Create a headless instance (no window system, no GLFW)
+        /// Use this for off-screen rendering without a display surface.
+        Builder& headless(bool enable = true);
+
         /// Build the Instance object
         InstancePtr build();
 
@@ -76,6 +80,7 @@ public:
         uint32_t engineVersion_ = VK_MAKE_VERSION(1, 0, 0);
         uint32_t apiVersion_ = VK_API_VERSION_1_2;
         bool validationEnabled_ = true;
+        bool headless_ = false;
         std::vector<const char*> extensions_;
 
         std::vector<const char*> getRequiredExtensions() const;
@@ -90,6 +95,9 @@ public:
 
     /// Check if validation layers are enabled
     bool validationEnabled() const { return validationEnabled_; }
+
+    /// Check if this is a headless instance (no window system)
+    bool isHeadless() const { return headless_; }
 
     /// Create a surface for a GLFW window (low-level, prefer createWindow())
     SurfacePtr createSurface(GLFWwindow* window);
@@ -129,6 +137,7 @@ private:
 
     VkInstance instance_ = VK_NULL_HANDLE;
     bool validationEnabled_ = false;
+    bool headless_ = false;
     DebugMessengerPtr debugMessenger_;
 };
 

@@ -6,6 +6,7 @@
 #include "finevk/core/logging.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 #include <set>
 
@@ -183,6 +184,21 @@ CommandPool* LogicalDevice::defaultCommandPool() {
 LogicalDevicePtr LogicalDeviceBuilder::build() {
     const auto& caps = physical_->capabilities();
     VkSurfaceKHR vkSurface = surface_ ? surface_->handle() : VK_NULL_HANDLE;
+
+    // Add swapchain extension when a surface is provided (windowed rendering)
+    if (surface_) {
+        // Only add if not already present (user may have added it manually)
+        bool hasSwapchain = false;
+        for (const auto* ext : extensions_) {
+            if (std::strcmp(ext, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) {
+                hasSwapchain = true;
+                break;
+            }
+        }
+        if (!hasSwapchain) {
+            extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        }
+    }
 
     // Get queue family indices
     auto graphicsFamily = caps.graphicsQueueFamily();

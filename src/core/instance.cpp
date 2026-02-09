@@ -67,12 +67,22 @@ Instance::Builder& Instance::Builder::addExtensions(const std::vector<const char
     return *this;
 }
 
-std::vector<const char*> Instance::Builder::getRequiredExtensions() const {
-    // Get GLFW required extensions
-    uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+Instance::Builder& Instance::Builder::headless(bool enable) {
+    headless_ = enable;
+    return *this;
+}
 
-    std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+std::vector<const char*> Instance::Builder::getRequiredExtensions() const {
+    std::vector<const char*> extensions;
+
+    if (!headless_) {
+        // Get GLFW required extensions (surface/platform extensions)
+        uint32_t glfwExtensionCount = 0;
+        const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        if (glfwExtensions) {
+            extensions.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        }
+    }
 
     // Add user-requested extensions
     extensions.insert(extensions.end(), extensions_.begin(), extensions_.end());
@@ -107,9 +117,11 @@ bool Instance::Builder::checkValidationLayerSupport() const {
 }
 
 InstancePtr Instance::Builder::build() {
-    // Initialize GLFW if not already done
-    if (!glfwInit()) {
-        throw std::runtime_error("Failed to initialize GLFW");
+    // Initialize GLFW if not already done (skip for headless)
+    if (!headless_) {
+        if (!glfwInit()) {
+            throw std::runtime_error("Failed to initialize GLFW");
+        }
     }
 
     // Check validation layer support
@@ -171,6 +183,7 @@ InstancePtr Instance::Builder::build() {
     auto instance = InstancePtr(new Instance());
     instance->instance_ = vkInstance;
     instance->validationEnabled_ = validationEnabled_;
+    instance->headless_ = headless_;
 
     // Create debug messenger if validation is enabled
     if (validationEnabled_) {
@@ -195,6 +208,7 @@ Instance::~Instance() {
 Instance::Instance(Instance&& other) noexcept
     : instance_(other.instance_)
     , validationEnabled_(other.validationEnabled_)
+    , headless_(other.headless_)
     , debugMessenger_(std::move(other.debugMessenger_)) {
     other.instance_ = VK_NULL_HANDLE;
 }
@@ -204,6 +218,7 @@ Instance& Instance::operator=(Instance&& other) noexcept {
         cleanup();
         instance_ = other.instance_;
         validationEnabled_ = other.validationEnabled_;
+        headless_ = other.headless_;
         debugMessenger_ = std::move(other.debugMessenger_);
         other.instance_ = VK_NULL_HANDLE;
     }
