@@ -71,7 +71,7 @@ int main() {
         std::cout << "\nWindow opened. Press Escape or close window to exit.\n";
 
         // Set up escape key to close window
-        window->onKey([&window](finevk::Key key, finevk::Action action, finevk::Modifier) {
+        window->onKey([&window](finevk::Key key, int /*scancode*/, finevk::Action action, finevk::Modifier) {
             if (key == GLFW_KEY_ESCAPE && action == finevk::Action::Press) {
                 window->close();
             }

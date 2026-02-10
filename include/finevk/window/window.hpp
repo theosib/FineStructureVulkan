@@ -327,7 +327,7 @@ public:
 
     // Callback-based events
     using ResizeCallback = std::function<void(uint32_t width, uint32_t height)>;
-    using KeyCallback = std::function<void(Key key, Action action, Modifier mods)>;
+    using KeyCallback = std::function<void(Key key, int scancode, Action action, Modifier mods)>;
     using MouseButtonCallback = std::function<void(MouseButton button, Action action, Modifier mods)>;
     using MouseMoveCallback = std::function<void(double x, double y)>;
     using ScrollCallback = std::function<void(double xoffset, double yoffset)>;

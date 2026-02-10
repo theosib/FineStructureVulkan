@@ -503,10 +503,11 @@ bool Window::isMouseCaptured() const {
 // GLFW callbacks
 // ============================================================================
 
-void Window::glfwKeyCallback(GLFWwindow* glfwWindow, int key, int /*scancode*/, int action, int mods) {
+void Window::glfwKeyCallback(GLFWwindow* glfwWindow, int key, int scancode, int action, int mods) {
     auto* window = static_cast<Window*>(glfwGetWindowUserPointer(glfwWindow));
     if (window && window->keyCallback_) {
         window->keyCallback_(key,
+                            scancode,
                             action == GLFW_RELEASE ? Action::Release :
                             action == GLFW_PRESS ? Action::Press : Action::Repeat,
                             glfwModsToModifier(mods));

@@ -191,16 +191,28 @@ void test_action_mapping() {
     std::cout << "PASSED\n";
 }
 
-void test_event_queue_polling() {
-    std::cout << "Test: InputManager - Event queue polling... ";
+void test_listener_immediate_dispatch() {
+    std::cout << "Test: InputManager - Listener immediate dispatch... ";
 
     auto input = InputManager::create(ctx.window.get());
 
-    // Inject multiple events
+    // Register listener to capture events
+    std::vector<InputEvent> received;
+    input->addListener([&received](const InputEvent& e) {
+        received.push_back(e);
+        return ListenerResult::Reject;  // Let others see it too
+    }, InputPriority::Game);
+
+    // Inject multiple events - listeners are called IMMEDIATELY during inject
     InputEvent event1;
     event1.type = InputEventType::KeyPress;
     event1.key = GLFW_KEY_A;
     input->injectEvent(event1);
+
+    // Event should be dispatched immediately
+    assert(received.size() == 1);
+    assert(received[0].type == InputEventType::KeyPress);
+    assert(received[0].key == GLFW_KEY_A);
 
     InputEvent event2;
     event2.type = InputEventType::KeyPress;
@@ -212,56 +224,49 @@ void test_event_queue_polling() {
     event3.state.mousePosition = glm::vec2(100.0f, 200.0f);
     input->injectEvent(event3);
 
-    // Poll events
-    std::vector<InputEvent> polled;
-    InputEvent e;
-    while (input->pollEvent(e)) {
-        polled.push_back(e);
-    }
-
-    assert(polled.size() == 3);
-    assert(polled[0].type == InputEventType::KeyPress);
-    assert(polled[0].key == GLFW_KEY_A);
-    assert(polled[1].type == InputEventType::KeyPress);
-    assert(polled[1].key == GLFW_KEY_B);
-    assert(polled[2].type == InputEventType::MouseMove);
-
-    // Queue should be empty now
-    assert(input->pollEvent(e) == false);
+    // All events dispatched immediately
+    assert(received.size() == 3);
+    assert(received[1].type == InputEventType::KeyPress);
+    assert(received[1].key == GLFW_KEY_B);
+    assert(received[2].type == InputEventType::MouseMove);
 
     std::cout << "PASSED\n";
 }
 
-void test_event_callback() {
-    std::cout << "Test: InputManager - Event callback... ";
+void test_listener_priority_ordering() {
+    std::cout << "Test: InputManager - Listener priority ordering... ";
 
     auto input = InputManager::create(ctx.window.get());
 
-    std::vector<InputEvent> received;
-    input->setEventCallback([&received](const InputEvent& e) {
-        received.push_back(e);
-    });
+    std::vector<int> order;
 
-    // Inject events
-    InputEvent event1;
-    event1.type = InputEventType::KeyPress;
-    event1.key = GLFW_KEY_X;
-    input->injectEvent(event1);
+    // Register listeners with different priorities (lower = higher precedence)
+    input->addListener([&order](const InputEvent& e) {
+        order.push_back(500);  // Game priority
+        return ListenerResult::Reject;
+    }, InputPriority::Game);
 
-    InputEvent event2;
-    event2.type = InputEventType::KeyRelease;
-    event2.key = GLFW_KEY_X;
-    input->injectEvent(event2);
+    input->addListener([&order](const InputEvent& e) {
+        order.push_back(100);  // TextInput priority (highest)
+        return ListenerResult::Reject;
+    }, InputPriority::TextInput);
 
-    // Events not dispatched until update()
-    assert(received.size() == 0);
+    input->addListener([&order](const InputEvent& e) {
+        order.push_back(300);  // HUD priority
+        return ListenerResult::Reject;
+    }, InputPriority::HUD);
 
-    input->update();
+    // Inject event - should call listeners in priority order
+    InputEvent event;
+    event.type = InputEventType::KeyPress;
+    event.key = GLFW_KEY_X;
+    input->injectEvent(event);
 
-    // Now callback should have been called
-    assert(received.size() == 2);
-    assert(received[0].type == InputEventType::KeyPress);
-    assert(received[1].type == InputEventType::KeyRelease);
+    // Verify order: 100 (TextInput), 300 (HUD), 500 (Game)
+    assert(order.size() == 3);
+    assert(order[0] == 100);
+    assert(order[1] == 300);
+    assert(order[2] == 500);
 
     std::cout << "PASSED\n";
 }
@@ -270,6 +275,12 @@ void test_fat_event_state() {
     std::cout << "Test: InputManager - Fat event contains complete state... ";
 
     auto input = InputManager::create(ctx.window.get());
+
+    std::vector<InputEvent> received;
+    input->addListener([&received](const InputEvent& e) {
+        received.push_back(e);
+        return ListenerResult::Reject;
+    }, InputPriority::Game);
 
     // Press W first
     InputEvent pressW;
@@ -286,38 +297,86 @@ void test_fat_event_state() {
     pressA.state.pressedKeys.insert(GLFW_KEY_A);
     input->injectEvent(pressA);
 
-    // Poll the A event and verify it contains W in state
-    InputEvent e;
-    input->pollEvent(e);  // Skip W event
-    bool got = input->pollEvent(e);  // Get A event
-    assert(got);
-    assert(e.type == InputEventType::KeyPress);
-    assert(e.key == GLFW_KEY_A);
-    assert(e.state.isKeyPressed(GLFW_KEY_W));  // Fat event: W still in state
-    assert(e.state.isKeyPressed(GLFW_KEY_A));
+    // Verify the A event contains W in state (fat event)
+    assert(received.size() == 2);
+    const auto& aEvent = received[1];
+    assert(aEvent.type == InputEventType::KeyPress);
+    assert(aEvent.key == GLFW_KEY_A);
+    assert(aEvent.state.isKeyPressed(GLFW_KEY_W));  // Fat event: W still in state
+    assert(aEvent.state.isKeyPressed(GLFW_KEY_A));
 
     std::cout << "PASSED\n";
 }
 
-void test_clear_events() {
-    std::cout << "Test: InputManager - Clear events... ";
+void test_listener_propagation() {
+    std::cout << "Test: InputManager - Listener propagation control... ";
 
     auto input = InputManager::create(ctx.window.get());
 
-    // Inject some events
-    InputEvent e;
-    e.type = InputEventType::KeyPress;
-    e.key = GLFW_KEY_Q;
-    input->injectEvent(e);
-    input->injectEvent(e);
-    input->injectEvent(e);
+    bool listener1Called = false;
+    bool listener2Called = false;
+    bool listener3Called = false;
 
-    // Clear
-    input->clearEvents();
+    // Listener 1 (highest priority) - consumes event
+    input->addListener([&listener1Called](const InputEvent& e) {
+        listener1Called = true;
+        return ListenerResult::Consumed;  // Stop propagation
+    }, 100);
 
-    // Queue should be empty
-    InputEvent out;
-    assert(input->pollEvent(out) == false);
+    // Listener 2 - should not be called because event consumed
+    input->addListener([&listener2Called](const InputEvent& e) {
+        listener2Called = true;
+        return ListenerResult::Reject;
+    }, 200);
+
+    // Listener 3 - should not be called
+    input->addListener([&listener3Called](const InputEvent& e) {
+        listener3Called = true;
+        return ListenerResult::Reject;
+    }, 300);
+
+    InputEvent event;
+    event.type = InputEventType::KeyPress;
+    event.key = GLFW_KEY_Q;
+    input->injectEvent(event);
+
+    // Only listener1 should have been called
+    assert(listener1Called == true);
+    assert(listener2Called == false);
+    assert(listener3Called == false);
+
+    std::cout << "PASSED\n";
+}
+
+void test_scroll_accumulation() {
+    std::cout << "Test: InputManager - Scroll accumulation... ";
+
+    // Test ScrollAccumulator directly (unit test)
+    ScrollAccumulator accX;
+
+    // Accumulate fractional values (like trackpad)
+    accX.accumulate(0.3f);
+    assert(accX.remainder() >= 0.29f && accX.remainder() <= 0.31f);
+
+    accX.accumulate(0.8f);
+    // Total = 1.1
+    assert(accX.remainder() >= 1.09f && accX.remainder() <= 1.11f);
+
+    // Consume whole ticks
+    int ticks = accX.consumeTicks();
+    assert(ticks == 1);  // Got 1 tick
+    assert(accX.remainder() >= 0.09f && accX.remainder() <= 0.11f);  // 0.1 left
+
+    // Test negative scrolling
+    ScrollAccumulator accY;
+    accY.accumulate(-2.7f);
+    int negativeTicks = accY.consumeTicks();
+    assert(negativeTicks == -3);  // floor(-2.7) = -3
+    assert(accY.remainder() >= 0.29f && accY.remainder() <= 0.31f);  // 0.3 left (remainder goes positive)
+
+    // Test reset
+    accX.reset();
+    assert(accX.remainder() == 0.0f);
 
     std::cout << "PASSED\n";
 }
@@ -366,10 +425,11 @@ int main() {
         test_input_state_queries();
         test_mouse_button_injection();
         test_action_mapping();
-        test_event_queue_polling();
-        test_event_callback();
+        test_listener_immediate_dispatch();
+        test_listener_priority_ordering();
         test_fat_event_state();
-        test_clear_events();
+        test_listener_propagation();
+        test_scroll_accumulation();
         test_clear_action_mappings();
 
         cleanup_test_context();

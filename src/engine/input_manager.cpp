@@ -1,5 +1,7 @@
 #include "finevk/engine/input_manager.hpp"
 
+#include <algorithm>
+
 namespace finevk {
 
 // ============================================================================
@@ -41,8 +43,8 @@ InputManager::~InputManager() {
 // ============================================================================
 
 void InputManager::setupCallbacks() {
-    window_->onKey([this](Key key, Action action, Modifier mods) {
-        handleKeyEvent(key, action, mods);
+    window_->onKey([this](Key key, int scancode, Action action, Modifier mods) {
+        handleKeyEvent(key, scancode, action, mods);
     });
 
     window_->onMouseButton([this](MouseButton button, Action action, Modifier mods) {
@@ -66,11 +68,12 @@ void InputManager::setupCallbacks() {
 // Event Handlers
 // ============================================================================
 
-void InputManager::handleKeyEvent(Key key, Action action, Modifier mods) {
+void InputManager::handleKeyEvent(Key key, int scancode, Action action, Modifier mods) {
     state_.modifiers = mods;
 
     InputEvent event;
     event.key = key;
+    event.scancode = scancode;
     event.time = currentTime();
 
     switch (action) {
@@ -92,7 +95,7 @@ void InputManager::handleKeyEvent(Key key, Action action, Modifier mods) {
     }
 
     event.state = state_;
-    queueEvent(std::move(event));
+    dispatchEvent(event);
 }
 
 void InputManager::handleMouseButtonEvent(MouseButton button, Action action, Modifier mods) {
@@ -122,7 +125,7 @@ void InputManager::handleMouseButtonEvent(MouseButton button, Action action, Mod
     }
 
     event.state = state_;
-    queueEvent(std::move(event));
+    dispatchEvent(event);
 }
 
 void InputManager::handleMouseMoveEvent(double x, double y) {
@@ -140,19 +143,23 @@ void InputManager::handleMouseMoveEvent(double x, double y) {
     event.type = InputEventType::MouseMove;
     event.time = currentTime();
     event.state = state_;
-    queueEvent(std::move(event));
+    dispatchEvent(event);
 }
 
 void InputManager::handleScrollEvent(double xoffset, double yoffset) {
-    scrollAccumulator_.x += static_cast<float>(xoffset);
-    scrollAccumulator_.y += static_cast<float>(yoffset);
-    state_.scrollDelta = scrollAccumulator_;
+    // Store raw fractional deltas
+    state_.scrollDelta.x = static_cast<float>(xoffset);
+    state_.scrollDelta.y = static_cast<float>(yoffset);
+
+    // Auto-accumulate for discrete ticks
+    state_.scrollAccumulatorX.accumulate(static_cast<float>(xoffset));
+    state_.scrollAccumulatorY.accumulate(static_cast<float>(yoffset));
 
     InputEvent event;
     event.type = InputEventType::MouseScroll;
     event.time = currentTime();
     event.state = state_;
-    queueEvent(std::move(event));
+    dispatchEvent(event);
 }
 
 void InputManager::handleCharEvent(uint32_t codepoint) {
@@ -161,29 +168,40 @@ void InputManager::handleCharEvent(uint32_t codepoint) {
     event.character = codepoint;
     event.time = currentTime();
     event.state = state_;
-    queueEvent(std::move(event));
+    dispatchEvent(event);
 }
 
 // ============================================================================
-// Event Queue
+// Listener Chain
 // ============================================================================
 
-void InputManager::queueEvent(InputEvent event) {
-    eventQueue_.push(std::move(event));
+int InputManager::addListener(InputListener listener, int priority) {
+    int id = nextListenerId_++;
+    listeners_.push_back({id, priority, std::move(listener)});
+
+    // Keep listeners sorted by priority (lower = higher precedence)
+    std::sort(listeners_.begin(), listeners_.end(),
+        [](const ListenerEntry& a, const ListenerEntry& b) {
+            return a.priority < b.priority;
+        });
+
+    return id;
 }
 
-bool InputManager::pollEvent(InputEvent& event) {
-    if (eventQueue_.empty()) {
-        return false;
-    }
-    event = std::move(eventQueue_.front());
-    eventQueue_.pop();
-    return true;
+void InputManager::removeListener(int id) {
+    listeners_.erase(
+        std::remove_if(listeners_.begin(), listeners_.end(),
+            [id](const ListenerEntry& entry) { return entry.id == id; }),
+        listeners_.end());
 }
 
-void InputManager::clearEvents() {
-    while (!eventQueue_.empty()) {
-        eventQueue_.pop();
+void InputManager::dispatchEvent(const InputEvent& event) {
+    for (const auto& entry : listeners_) {
+        ListenerResult result = entry.listener(event);
+        if (result == ListenerResult::Consumed) {
+            break;  // Stop propagation
+        }
+        // Reject and Used both continue to next listener
     }
 }
 
@@ -192,35 +210,30 @@ void InputManager::clearEvents() {
 // ============================================================================
 
 void InputManager::update() {
-    // Dispatch events via callback if set
-    if (eventCallback_) {
-        InputEvent event;
-        while (pollEvent(event)) {
-            eventCallback_(event);
-        }
-    }
-
     // Clear per-frame state for next frame
+    // Events are dispatched immediately to listeners as they occur
     keysPressed_.clear();
     keysReleased_.clear();
     buttonsPressed_.clear();
     buttonsReleased_.clear();
     state_.mouseDelta = glm::vec2(0.0f);
     state_.scrollDelta = glm::vec2(0.0f);
-    scrollAccumulator_ = glm::vec2(0.0f);
 }
 
 // ============================================================================
-// Mouse Capture
+// Cursor Mode
 // ============================================================================
 
-void InputManager::setMouseCaptured(bool captured) {
-    mouseCaptured_ = captured;
+void InputManager::setCursorMode(CursorMode mode) {
+    state_.cursorMode = mode;
     if (window_) {
+        // For now, map to Window's setMouseCaptured (Disabled = captured, others = not)
+        // TODO: Extend Window with full CursorMode support (Normal/Hidden/Disabled)
+        bool captured = (mode == CursorMode::Disabled);
         window_->setMouseCaptured(captured);
 
         if (captured) {
-            // Reset last position to current to avoid jump on capture
+            // Reset last position to avoid jump when entering camera mode
             auto pos = window_->mousePosition();
             lastMousePosition_ = glm::vec2(static_cast<float>(pos.x), static_cast<float>(pos.y));
             state_.mousePosition = lastMousePosition_;
@@ -324,8 +337,8 @@ void InputManager::injectEvent(const InputEvent& event) {
             break;
     }
 
-    // Queue the event
-    queueEvent(event);
+    // Dispatch the event to listeners
+    dispatchEvent(event);
 }
 
 // ============================================================================

@@ -135,7 +135,7 @@ int main() {
         auto startTime = std::chrono::high_resolution_clock::now();
 
         // Set up escape key to close window
-        window->onKey([&window](Key key, Action action, Modifier) {
+        window->onKey([&window](Key key, int /*scancode*/, Action action, Modifier) {
             if (key == GLFW_KEY_ESCAPE && action == Action::Press) {
                 window->close();
             }

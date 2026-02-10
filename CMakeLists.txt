@@ -260,6 +260,7 @@ if(FINEVK_BUILD_ENGINE)
         src/engine/font_atlas.cpp
         src/engine/text_renderer.cpp
         src/engine/input_manager.cpp
+        src/engine/scroll_accumulator.cpp
     )
 
     # Engine library headers (for dependency tracking)
