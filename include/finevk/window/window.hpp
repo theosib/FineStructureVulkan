@@ -286,17 +286,32 @@ public:
     // ========================================================================
 
     /**
+     * @brief Wait for the current frame slot's fence to be signaled (blocking, thread-safe)
+     *
+     * Blocks until the GPU has finished rendering the frame that previously used
+     * the current frame slot. Can be called from any thread to synchronize with
+     * GPU completion.
+     *
+     * Useful for overlapping CPU work (mesh processing, etc.) with GPU fence wait
+     * on a background thread. Call this from a background thread, do work on the
+     * main thread, then call beginFrame(true) to skip the redundant wait.
+     */
+    void waitForCurrentFrameFence();
+
+    /**
      * @brief Begin a new frame
      *
-     * Waits for the previous frame using this slot to complete, then acquires
-     * the next swap chain image. Returns frame information including sync objects.
+     * Waits for the previous frame using this slot to complete (unless skipFenceWait=true),
+     * then acquires the next swap chain image. Returns frame information including sync objects.
      *
      * Returns std::nullopt if the window is minimized or being resized.
      * In that case, just skip the frame and call beginFrame() again next iteration.
      *
+     * @param skipFenceWait If true, assumes fence already signaled via waitForCurrentFrameFence().
+     *                      Caller MUST ensure the fence is ready before passing true.
      * @return Frame information, or nullopt if frame should be skipped
      */
-    std::optional<FrameInfo> beginFrame();
+    std::optional<FrameInfo> beginFrame(bool skipFenceWait = false);
 
     /**
      * @brief Present the current frame

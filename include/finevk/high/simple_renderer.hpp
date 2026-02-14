@@ -182,14 +182,28 @@ public:
     // =========================================================================
 
     /**
+     * @brief Wait for the current frame slot's fence to be signaled (blocking, thread-safe)
+     *
+     * Blocks until the GPU has finished rendering the frame that previously used
+     * the current frame slot. Can be called from any thread to synchronize with
+     * GPU completion.
+     *
+     * Useful for overlapping CPU work with GPU fence wait on a background thread.
+     * See Window::waitForCurrentFrameFence() for details.
+     */
+    void waitForCurrentFrameFence();
+
+    /**
      * @brief Begin a new frame
      *
-     * Waits for previous frame to finish, acquires swap chain image,
-     * and begins command buffer recording.
+     * Waits for previous frame to finish (unless skipFenceWait=true), acquires
+     * swap chain image, and begins command buffer recording.
      *
+     * @param skipFenceWait If true, assumes fence already signaled via waitForCurrentFrameFence().
+     *                      Caller MUST ensure the fence is ready before passing true.
      * @return Frame begin result with command buffer if successful
      */
-    FrameBeginResult beginFrame();
+    FrameBeginResult beginFrame(bool skipFenceWait = false);
 
     /**
      * @brief Begin the render pass

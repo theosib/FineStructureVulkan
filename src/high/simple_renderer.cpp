@@ -166,11 +166,15 @@ uint32_t SimpleRenderer::currentFrame() const {
 // Frame lifecycle
 // ============================================================================
 
-FrameBeginResult SimpleRenderer::beginFrame() {
+void SimpleRenderer::waitForCurrentFrameFence() {
+    window_->waitForCurrentFrameFence();
+}
+
+FrameBeginResult SimpleRenderer::beginFrame(bool skipFenceWait) {
     FrameBeginResult result{};
 
     // Delegate to Window for frame acquisition
-    auto frameOpt = window_->beginFrame();
+    auto frameOpt = window_->beginFrame(skipFenceWait);
 
     if (!frameOpt) {
         // Window is minimized or resize in progress

@@ -392,7 +392,14 @@ void Window::bindDevice(LogicalDevice& device) {
 // Frame lifecycle
 // ============================================================================
 
-std::optional<FrameInfo> Window::beginFrame() {
+void Window::waitForCurrentFrameFence() {
+    if (!device_) {
+        throw std::runtime_error("Window not bound to a device");
+    }
+    inFlightFences_[currentFrameIndex_]->wait();
+}
+
+std::optional<FrameInfo> Window::beginFrame(bool skipFenceWait) {
     if (!device_) {
         throw std::runtime_error("Window not bound to a device. Call bindDevice() first.");
     }
@@ -402,8 +409,10 @@ std::optional<FrameInfo> Window::beginFrame() {
         return std::nullopt;
     }
 
-    // Wait for this frame's fence
-    inFlightFences_[currentFrameIndex_]->wait();
+    // Wait for this frame's fence (unless caller already did)
+    if (!skipFenceWait) {
+        inFlightFences_[currentFrameIndex_]->wait();
+    }
 
     // Get sync objects for this frame
     VkSemaphore imageAvailable = imageAvailableSemaphores_[currentFrameIndex_]->handle();
