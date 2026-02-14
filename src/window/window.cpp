@@ -399,6 +399,14 @@ void Window::waitForCurrentFrameFence() {
     inFlightFences_[currentFrameIndex_]->wait();
 }
 
+bool Window::waitForCurrentFrameFence(uint64_t timeoutNs) {
+    if (!device_) {
+        throw std::runtime_error("Window not bound to a device");
+    }
+    inFlightFences_[currentFrameIndex_]->wait(timeoutNs);
+    return inFlightFences_[currentFrameIndex_]->isSignaled();
+}
+
 std::optional<FrameInfo> Window::beginFrame(bool skipFenceWait) {
     if (!device_) {
         throw std::runtime_error("Window not bound to a device. Call bindDevice() first.");

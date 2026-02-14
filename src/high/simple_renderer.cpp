@@ -170,6 +170,10 @@ void SimpleRenderer::waitForCurrentFrameFence() {
     window_->waitForCurrentFrameFence();
 }
 
+bool SimpleRenderer::waitForCurrentFrameFence(uint64_t timeoutNs) {
+    return window_->waitForCurrentFrameFence(timeoutNs);
+}
+
 FrameBeginResult SimpleRenderer::beginFrame(bool skipFenceWait) {
     FrameBeginResult result{};
 

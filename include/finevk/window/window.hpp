@@ -299,6 +299,17 @@ public:
     void waitForCurrentFrameFence();
 
     /**
+     * @brief Wait for the current frame slot's fence with a timeout
+     *
+     * Same as waitForCurrentFrameFence() but returns after timeoutNs nanoseconds
+     * if the fence hasn't signaled yet.
+     *
+     * @param timeoutNs Timeout in nanoseconds
+     * @return true if fence is signaled, false if still pending
+     */
+    bool waitForCurrentFrameFence(uint64_t timeoutNs);
+
+    /**
      * @brief Begin a new frame
      *
      * Waits for the previous frame using this slot to complete (unless skipFenceWait=true),
