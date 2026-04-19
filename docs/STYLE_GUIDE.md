@@ -55,6 +55,34 @@ FineVK is a high-performance Vulkan framework that automates Vulkan's mechanics 
 - MSAA: `MSAALevel::Medium` alongside raw `VkSampleCountFlagBits`
 - The convenience form should be documented/recommended; the raw form exists for advanced use
 
+### NEVER RETURN AS RAW HANDLES FROM PUBLIC APIs
+The "expose as data" allowance is for Vulkan **values** (formats, extents, flags, enums). It is NOT a license to return raw Vulkan **resource handles**. Resource types have Vulkan-tracked lifetimes and MUST be wrapped.
+
+Always return the finevk wrapper, not the raw handle:
+
+| Raw Vulkan handle | finevk wrapper |
+|---|---|
+| `VkImage` | `Image` |
+| `VkBuffer` | `Buffer` |
+| `VkSemaphore` | `Semaphore` |
+| `VkFence` | `Fence` |
+| `VkCommandBuffer` | `CommandBuffer` |
+| `VkCommandPool` | `CommandPool` |
+| `VkPipeline` | `GraphicsPipeline` / `ComputePipeline` |
+| `VkPipelineLayout` | `PipelineLayout` |
+| `VkRenderPass` | `RenderPass` |
+| `VkFramebuffer` | `Framebuffer` |
+| `VkImageView` | `ImageView` |
+| `VkSampler` | `Sampler` |
+| `VkSwapchainKHR` | `SwapChain` |
+| `VkShaderModule` | `ShaderModule` |
+| `VkDescriptorSet`, `VkDescriptorPool` | `DescriptorSet`, `DescriptorPool` |
+| `VkDeviceMemory` | managed inside `Image`/`Buffer`, never exposed |
+
+Raw handles remain accessible via `.handle()` on the wrapper — Level 4 "raw Vulkan" escape hatch (see §11), not the default access path. If a public API needs to *accept* one of these types as a parameter, prefer the wrapper form per the triple-overload rule (see §3).
+
+**Rule of thumb when adding a new public API:** does the value identify an object with a Vulkan-tracked lifetime? → wrap. Does it just describe how to configure one? → pass through as data.
+
 ---
 
 ## 3. Construction Patterns
