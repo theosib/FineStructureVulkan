@@ -115,9 +115,12 @@ BufferPtr Buffer::createUniformBuffer(LogicalDevice* device, VkDeviceSize size) 
 }
 
 BufferPtr Buffer::createStagingBuffer(LogicalDevice* device, VkDeviceSize size) {
+    // TRANSFER_DST_BIT is required so the same staging buffer can serve as the
+    // destination of vkCmdCopyImageToBuffer (Image::readbackToCPU). Without it,
+    // MoltenVK trips VUID-vkCmdCopyImageToBuffer-dstBuffer-00191.
     return create(device)
         .size(size)
-        .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+        .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
         .memoryUsage(MemoryUsage::CpuToGpu)
         .build();
 }

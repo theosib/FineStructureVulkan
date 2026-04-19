@@ -195,6 +195,91 @@ void test_unsupported_format_throws(Ctx& c) {
     std::cout << "PASSED\n";
 }
 
+// Swapchain-mirror readback test.
+//
+// Background: the previous task shipped Image::readbackToCPU with a currentLayout
+// parameter so callers can read back from any layout. For swapchain images, that
+// layout is VK_IMAGE_LAYOUT_PRESENT_SRC_KHR (the state every swapchain image is
+// in between the last render pass and vkQueuePresent). This task adds
+// TRANSFER_SRC_BIT to swapchain images so this readback path is reachable, plus
+// TRANSFER_DST_BIT to the staging buffer so the copy-image-to-buffer downstream
+// no longer trips VUID-vkCmdCopyImageToBuffer-dstBuffer-00191.
+//
+// The test mirrors the swapchain config exactly (image flags + render-pass clear
+// + finalLayout = PRESENT_SRC_KHR) without an actual surface. Uses a dedicated
+// context that enables VK_KHR_swapchain at the device level so validation
+// recognises the PRESENT_SRC_KHR layout token.
+void test_present_src_layout_readback() {
+    std::cout << "Test: PRESENT_SRC_KHR layout readback (swapchain mirror)... ";
+
+    // Dedicated headless context that ALSO enables the swapchain device extension.
+    // Without it, validation rejects PRESENT_SRC_KHR ("not within the valid
+    // VkImageLayout range"). The extension is purely a token-recognition need
+    // here; we never create a swapchain, never need a surface.
+    // VK_KHR_swapchain (device) lists VK_KHR_surface (instance) as a hard
+    // dependency — add the surface extension explicitly. We never create a
+    // surface; the extensions are present only so PRESENT_SRC_KHR is a known
+    // layout token.
+    auto instance = Instance::create()
+        .applicationName("Readback PRESENT_SRC_KHR Test")
+        .headless()
+        .addExtension(VK_KHR_SURFACE_EXTENSION_NAME)
+        .enableValidation(true)
+        .build();
+    auto physical = instance->selectPhysicalDevice();
+    LogicalDevicePtr device;
+    try {
+        device = physical.createLogicalDevice()
+            .addExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+            .build();
+    } catch (const std::exception& e) {
+        std::cout << "SKIPPED (device cannot enable VK_KHR_swapchain in headless: "
+                  << e.what() << ")\n";
+        return;
+    }
+    auto stagingPool = StagingPool::create(device.get())
+        .initialSize(1 * 1024 * 1024)
+        .build();
+
+    constexpr uint32_t W = 16;
+    constexpr uint32_t H = 16;
+    constexpr VkFormat kFormat = VK_FORMAT_B8G8R8A8_UNORM;
+
+    // Image flags identical to a swapchain image after this task's fix.
+    auto image = Image::create(device.get())
+        .extent(W, H)
+        .format(kFormat)
+        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+        .build();
+
+    // RenderTarget that ends in PRESENT_SRC_KHR — the same final layout SwapChain
+    // images are left in by a normal render pass.
+    auto renderTarget = RenderTarget::create(device.get())
+        .colorAttachment(image.get())
+        .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        .build();
+
+    // One-shot render-pass clear (LOAD_OP_CLEAR), submit, wait.
+    {
+        auto imm = device->defaultCommandPool()->beginImmediate();
+        renderTarget->begin(imm.cmd(), {0.0f, 1.0f, 0.0f, 1.0f}); // green
+        renderTarget->end(imm.cmd());
+    }
+
+    std::vector<uint8_t> pixels;
+    image->readbackToCPU(pixels, stagingPool, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    assert(pixels.size() == W * H * 4);
+
+    // BGRA byte order: bytes are B,G,R,A. Expect pure green everywhere.
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        assert(pixels[i + 0] == 0);   // B
+        assert(pixels[i + 1] == 255); // G
+        assert(pixels[i + 2] == 0);   // R
+        assert(pixels[i + 3] == 255); // A
+    }
+    std::cout << "PASSED\n";
+}
+
 void test_msaa_throws(Ctx& c) {
     std::cout << "Test: multisampled image throws... ";
 
@@ -235,6 +320,7 @@ int main() {
         test_out_of_bounds_throws(c);
         test_unsupported_format_throws(c);
         test_msaa_throws(c);
+        test_present_src_layout_readback();
 
         std::cout << "\nAll readback tests PASSED.\n";
     } catch (const std::exception& e) {

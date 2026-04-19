@@ -253,8 +253,11 @@ handle() -> VkSampler
 
 // Image readback (GPU -> CPU, synchronous, blocking)
 // Requires VK_IMAGE_USAGE_TRANSFER_SRC_BIT. OffscreenSurface's colorImage()
-// has this flag on by default. Format must be one of R8G8B8A8_{UNORM,SRGB},
-// B8G8R8A8_{UNORM,SRGB}. Samples must be 1 (resolve MSAA first).
+// and SwapChain images both carry this flag by default (the latter when the
+// surface advertises support — true on every desktop driver finevk targets).
+// For swapchain readback pass currentLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR.
+// Format must be one of R8G8B8A8_{UNORM,SRGB}, B8G8R8A8_{UNORM,SRGB}.
+// Samples must be 1 (resolve MSAA first).
 // Output is row-major, tightly packed (no row padding), in the image's native
 // byte order (no colour-space conversion). Vector is resized to match.
 Image::readbackToCPU(vector<uint8_t>& out, StagingPool*, VkImageLayout = SHADER_READ_ONLY_OPTIMAL)

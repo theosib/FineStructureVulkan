@@ -10,6 +10,27 @@
 
 namespace finevk {
 
+namespace {
+
+// Compose swapchain image usage flags. COLOR_ATTACHMENT_BIT is always required.
+// TRANSFER_SRC_BIT enables Image::readbackToCPU on swapchain images (screenshots,
+// visual-test oracle). It is honoured only when the surface advertises support;
+// platforms without it stay usable (readback then fails with a clear Vulkan error
+// downstream).
+VkImageUsageFlags composeSwapchainUsage(VkImageUsageFlags supportedUsageFlags) {
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    } else {
+        FINEVK_WARN(LogCategory::Core,
+            "Surface does not advertise VK_IMAGE_USAGE_TRANSFER_SRC_BIT; "
+            "swapchain readback (screenshots) will be unavailable.");
+    }
+    return usage;
+}
+
+} // namespace
+
 // ============================================================================
 // SwapChain::Builder implementation
 // ============================================================================
@@ -104,7 +125,7 @@ SwapChainPtr SwapChain::Builder::build() {
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage = composeSwapchainUsage(support.capabilities.supportedUsageFlags);
 
     // Handle queue family indices
     Queue* graphicsQueue = device_->graphicsQueue();
@@ -320,7 +341,7 @@ void SwapChain::recreate(uint32_t width, uint32_t height) {
     createInfo.imageColorSpace = format_.colorSpace;
     createInfo.imageExtent = newExtent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage = composeSwapchainUsage(support.capabilities.supportedUsageFlags);
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform = support.capabilities.currentTransform;
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
