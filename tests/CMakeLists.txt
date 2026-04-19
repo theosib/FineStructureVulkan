@@ -42,5 +42,12 @@ add_executable(test_input_manager
 
 target_link_libraries(test_input_manager PRIVATE finevk-core finevk-engine)
 
+# Image readback test - headless, proves GPU -> CPU round-trip
+add_executable(test_readback
+    test_readback.cpp
+)
+
+target_link_libraries(test_readback PRIVATE finevk-core)
+
 # Copy any required resources
 # (none for Phase 1/2/3/4/5)

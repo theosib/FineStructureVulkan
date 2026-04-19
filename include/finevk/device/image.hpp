@@ -4,12 +4,15 @@
 #include "finevk/core/types.hpp"
 
 #include <vulkan/vulkan.h>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace finevk {
 
 class LogicalDevice;
 class ImageView;
+class StagingPool;
 
 /**
  * @brief Vulkan image wrapper with memory management
@@ -164,6 +167,55 @@ public:
 
     /// Check if image was created with external memory (e.g., swap chain image)
     bool ownsMemory() const { return ownsMemory_; }
+
+    /**
+     * @brief Copy the full image to a CPU byte buffer
+     *
+     * Issues a blocking GPU-to-CPU copy via a staging buffer. Output is
+     * row-major, tightly packed (width * height * bytesPerPixel), in the
+     * image's native format (no colour-space conversion).
+     *
+     * The image is transitioned from @p currentLayout to TRANSFER_SRC_OPTIMAL
+     * and back. For images post-OffscreenSurface render pass, the default
+     * SHADER_READ_ONLY_OPTIMAL matches the render target's final layout.
+     *
+     * Preconditions:
+     *  - Image was created with VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+     *  - samples() == VK_SAMPLE_COUNT_1_BIT (resolve MSAA targets first)
+     *  - format() is one of: R8G8B8A8_{UNORM,SRGB}, B8G8R8A8_{UNORM,SRGB}
+     *
+     * Throws std::runtime_error if preconditions are not met.
+     */
+    void readbackToCPU(std::vector<uint8_t>& out, StagingPool* stagingPool,
+                       VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    void readbackToCPU(std::vector<uint8_t>& out, StagingPool& stagingPool,
+                       VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        readbackToCPU(out, &stagingPool, currentLayout);
+    }
+    void readbackToCPU(std::vector<uint8_t>& out, const std::unique_ptr<StagingPool>& stagingPool,
+                       VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        readbackToCPU(out, stagingPool.get(), currentLayout);
+    }
+
+    /**
+     * @brief Copy a subrectangle of the image to a CPU byte buffer
+     *
+     * Same semantics as readbackToCPU() but copies only the [x, x+w) x [y, y+h)
+     * region. Output size is w * h * bytesPerPixel, row-major tightly packed.
+     */
+    void readbackRegionToCPU(std::vector<uint8_t>& out, StagingPool* stagingPool,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    void readbackRegionToCPU(std::vector<uint8_t>& out, StagingPool& stagingPool,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        readbackRegionToCPU(out, &stagingPool, x, y, w, h, currentLayout);
+    }
+    void readbackRegionToCPU(std::vector<uint8_t>& out, const std::unique_ptr<StagingPool>& stagingPool,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             VkImageLayout currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        readbackRegionToCPU(out, stagingPool.get(), x, y, w, h, currentLayout);
+    }
 
     /// Destructor
     ~Image();

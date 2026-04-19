@@ -48,7 +48,7 @@ std::unique_ptr<OffscreenSurface> OffscreenSurface::Builder::build() {
     surface->colorImage_ = Image::create(device_)
         .extent(width_, height_)
         .format(colorFormat_)
-        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
         .mipLevels(1)
         .memoryUsage(MemoryUsage::GpuOnly)
         .build();
@@ -203,7 +203,7 @@ void OffscreenSurface::resize(uint32_t width, uint32_t height) {
     colorImage_ = Image::create(device_)
         .extent(width, height)
         .format(oldImage->format())
-        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+        .usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
         .mipLevels(1)
         .memoryUsage(MemoryUsage::GpuOnly)
         .build();

@@ -1,8 +1,12 @@
 #include "finevk/device/image.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/physical_device.hpp"
+#include "finevk/device/buffer.hpp"
+#include "finevk/device/command.hpp"
+#include "finevk/device/staging_pool.hpp"
 #include "finevk/core/logging.hpp"
 
+#include <cstring>
 #include <stdexcept>
 
 namespace finevk {
@@ -293,6 +297,96 @@ ImagePtr Image::createMatchingDepthBuffer(VkFormat format, VkSampleCountFlagBits
         .samples(samples)
         .memoryUsage(MemoryUsage::GpuOnly)
         .build();
+}
+
+// ============================================================================
+// Readback
+// ============================================================================
+
+namespace {
+
+uint32_t readbackBytesPerPixel(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_B8G8R8A8_SRGB:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
+} // namespace
+
+void Image::readbackToCPU(std::vector<uint8_t>& out, StagingPool* stagingPool,
+                          VkImageLayout currentLayout) {
+    readbackRegionToCPU(out, stagingPool, 0, 0, extent_.width, extent_.height, currentLayout);
+}
+
+void Image::readbackRegionToCPU(std::vector<uint8_t>& out, StagingPool* stagingPool,
+                                uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                VkImageLayout currentLayout) {
+    if (!stagingPool) {
+        throw std::runtime_error("Image::readback: stagingPool is null");
+    }
+    if (samples_ != VK_SAMPLE_COUNT_1_BIT) {
+        throw std::runtime_error("Image::readback: MSAA images not supported (samples must be 1); resolve first");
+    }
+    uint32_t bpp = readbackBytesPerPixel(format_);
+    if (bpp == 0) {
+        throw std::runtime_error("Image::readback: unsupported format (supported: R8G8B8A8_UNORM/SRGB, B8G8R8A8_UNORM/SRGB)");
+    }
+    if (w == 0 || h == 0) {
+        throw std::runtime_error("Image::readback: zero-sized region");
+    }
+    if (x + w > extent_.width || y + h > extent_.height) {
+        throw std::runtime_error("Image::readback: region out of bounds");
+    }
+
+    const VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * bpp;
+    out.resize(static_cast<size_t>(size));
+
+    StagingAllocation staging = stagingPool->acquire(size);
+    if (!staging.isValid()) {
+        throw std::runtime_error("Image::readback: failed to acquire staging buffer");
+    }
+
+    CommandPool* pool = device_->defaultCommandPool();
+    {
+        auto imm = pool->beginImmediate();
+        auto& cmd = imm.cmd();
+
+        cmd.transitionImageLayout(*this, currentLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+        VkBufferImageCopy region{};
+        region.bufferOffset = staging.offset;
+        region.bufferRowLength = 0;   // tightly packed
+        region.bufferImageHeight = 0; // tightly packed
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {static_cast<int32_t>(x), static_cast<int32_t>(y), 0};
+        region.imageExtent = {w, h, 1};
+
+        vkCmdCopyImageToBuffer(
+            cmd.handle(),
+            image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            staging.buffer->handle(), 1, &region);
+
+        cmd.transitionImageLayout(*this, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, currentLayout);
+
+        // imm destructor submits and waits for queue idle
+    }
+
+    // Host-visible + coherent (see MemoryAllocator::getMemoryProperties) — no flush/invalidate needed.
+    std::memcpy(out.data(),
+                static_cast<const uint8_t*>(staging.mappedPtr) + staging.offset,
+                static_cast<size_t>(size));
+
+    // Queue is idle (ImmediateCommands called waitIdle); safe to release immediately.
+    stagingPool->release(staging, VK_NULL_HANDLE);
 }
 
 // ============================================================================

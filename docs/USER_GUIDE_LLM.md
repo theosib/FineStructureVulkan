@@ -250,6 +250,29 @@ Sampler::create(device)
     .anisotropy(float) .mipmaps(bool)
     .build() -> SamplerPtr
 handle() -> VkSampler
+
+// Image readback (GPU -> CPU, synchronous, blocking)
+// Requires VK_IMAGE_USAGE_TRANSFER_SRC_BIT. OffscreenSurface's colorImage()
+// has this flag on by default. Format must be one of R8G8B8A8_{UNORM,SRGB},
+// B8G8R8A8_{UNORM,SRGB}. Samples must be 1 (resolve MSAA first).
+// Output is row-major, tightly packed (no row padding), in the image's native
+// byte order (no colour-space conversion). Vector is resized to match.
+Image::readbackToCPU(vector<uint8_t>& out, StagingPool*, VkImageLayout = SHADER_READ_ONLY_OPTIMAL)
+Image::readbackRegionToCPU(vector<uint8_t>& out, StagingPool*, x, y, w, h, VkImageLayout = SHADER_READ_ONLY_OPTIMAL)
+```
+
+Example — screenshot from an OffscreenSurface:
+```cpp
+auto surface = OffscreenSurface::create(device).extent(256, 256).build();
+auto pool = StagingPool::create(device).build();
+// ...render a frame...
+surface->beginFrame();
+surface->beginRenderPass({0.2f, 0.2f, 0.3f, 1.0f});
+surface->endRenderPass();
+surface->endFrame();
+
+std::vector<uint8_t> rgba;
+surface->colorImage()->readbackToCPU(rgba, pool);  // width * height * 4 bytes
 ```
 
 ### CommandPool, CommandBuffer
@@ -505,9 +528,11 @@ endRenderPass()
 endFrame()         // Submits command buffer with fence
 
 // Result access
-colorImage() -> Image*          // The rendered image
+colorImage() -> Image*          // The rendered image (TRANSFER_SRC usage is on by default)
 colorImageView() -> ImageView*  // For descriptor set binding
 colorSampler() -> Sampler*      // Lazy-created linear + clamp-to-edge sampler
+
+// Screenshot / visual-test readback: colorImage()->readbackToCPU(vec, pool) — see Image section.
 currentCommandBuffer() -> CommandBuffer*
 
 // Resize
