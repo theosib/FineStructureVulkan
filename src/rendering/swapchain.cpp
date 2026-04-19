@@ -172,7 +172,8 @@ SwapChainPtr SwapChain::Builder::build() {
     swapChain->images_.resize(actualImageCount);
     vkGetSwapchainImagesKHR(device_->handle(), vkSwapChain, &actualImageCount, swapChain->images_.data());
 
-    // Create image views
+    // Create image wrappers and views
+    swapChain->createImageWrappers();
     swapChain->createImageViews();
 
     FINEVK_INFO(LogCategory::Core, "Swap chain created: " +
@@ -202,6 +203,7 @@ SwapChain::SwapChain(SwapChain&& other) noexcept
     , extent_(other.extent_)
     , presentMode_(other.presentMode_)
     , images_(std::move(other.images_))
+    , imageWrappers_(std::move(other.imageWrappers_))
     , imageViews_(std::move(other.imageViews_))
     , needsRecreation_(other.needsRecreation_) {
     other.swapChain_ = VK_NULL_HANDLE;
@@ -217,6 +219,7 @@ SwapChain& SwapChain::operator=(SwapChain&& other) noexcept {
         extent_ = other.extent_;
         presentMode_ = other.presentMode_;
         images_ = std::move(other.images_);
+        imageWrappers_ = std::move(other.imageWrappers_);
         imageViews_ = std::move(other.imageViews_);
         needsRecreation_ = other.needsRecreation_;
         other.swapChain_ = VK_NULL_HANDLE;
@@ -227,10 +230,23 @@ SwapChain& SwapChain::operator=(SwapChain&& other) noexcept {
 void SwapChain::cleanup() {
     if (swapChain_ != VK_NULL_HANDLE && device_ != nullptr) {
         imageViews_.clear();
+        imageWrappers_.clear();
         images_.clear();
         vkDestroySwapchainKHR(device_->handle(), swapChain_, nullptr);
         swapChain_ = VK_NULL_HANDLE;
         FINEVK_DEBUG(LogCategory::Core, "Swap chain destroyed");
+    }
+}
+
+void SwapChain::createImageWrappers() {
+    imageWrappers_.clear();
+    imageWrappers_.reserve(images_.size());
+
+    const VkExtent3D extent3d{extent_.width, extent_.height, 1};
+    for (VkImage image : images_) {
+        // Uses Image's private external-image constructor (friend access).
+        // ownsMemory_ is false for these — VkImage is owned by the swapchain.
+        imageWrappers_.push_back(ImagePtr(new Image(device_, image, format_.format, extent3d)));
     }
 }
 
@@ -265,6 +281,14 @@ void SwapChain::createImageViews() {
         // are managed by the swap chain
         imageViews_.push_back(ImageViewPtr(new ImageView(device_, nullptr, view)));
     }
+}
+
+Image& SwapChain::image(uint32_t index) {
+    if (index >= imageWrappers_.size()) {
+        throw std::runtime_error("SwapChain::image: index " + std::to_string(index) +
+            " out of range (size=" + std::to_string(imageWrappers_.size()) + ")");
+    }
+    return *imageWrappers_[index];
 }
 
 AcquireResult SwapChain::acquireNextImage(VkSemaphore signalSemaphore, uint64_t timeout) {
@@ -371,6 +395,7 @@ void SwapChain::recreate(uint32_t width, uint32_t height) {
 
     // Clean up old resources
     imageViews_.clear();
+    imageWrappers_.clear();
     images_.clear();
     vkDestroySwapchainKHR(device_->handle(), oldSwapChain, nullptr);
 
@@ -385,7 +410,8 @@ void SwapChain::recreate(uint32_t width, uint32_t height) {
     images_.resize(imageCount);
     vkGetSwapchainImagesKHR(device_->handle(), swapChain_, &imageCount, images_.data());
 
-    // Create new image views
+    // Create new image wrappers and views
+    createImageWrappers();
     createImageViews();
 
     FINEVK_INFO(LogCategory::Core, "Swap chain recreated: " +

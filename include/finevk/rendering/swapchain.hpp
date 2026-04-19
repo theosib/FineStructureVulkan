@@ -91,6 +91,20 @@ public:
     /// Get swap chain images
     const std::vector<VkImage>& images() const { return images_; }
 
+    /**
+     * @brief Get a swap chain image as a finevk::Image wrapper
+     *
+     * Enables passing swap chain images to APIs that take Image&/Image*
+     * (e.g., Image::readbackToCPU for screenshots). Wrappers are created
+     * eagerly at swap chain construction and regenerated on recreate(),
+     * so the returned reference is invalidated by recreate() — same
+     * contract as imageViews(). The returned Image does not own the
+     * underlying VkImage (ownsMemory() == false).
+     *
+     * Throws std::runtime_error if @p index is out of range.
+     */
+    Image& image(uint32_t index);
+
     /// Get swap chain image views
     const std::vector<ImageViewPtr>& imageViews() const { return imageViews_; }
 
@@ -124,6 +138,7 @@ private:
     SwapChain() = default;
 
     void createImageViews();
+    void createImageWrappers();
     void cleanup();
 
     LogicalDevice* device_ = nullptr;
@@ -134,6 +149,7 @@ private:
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
 
     std::vector<VkImage> images_;
+    std::vector<ImagePtr> imageWrappers_;
     std::vector<ImageViewPtr> imageViews_;
 
     bool needsRecreation_ = false;

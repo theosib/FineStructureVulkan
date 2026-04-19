@@ -353,6 +353,69 @@ void test_descriptor_writer() {
     std::cout << "PASSED\n";
 }
 
+void test_swapchain_image_accessor() {
+    std::cout << "Testing: SwapChain::image() accessor... ";
+
+    const uint32_t count = ctx.swapChain->imageCount();
+    const VkExtent2D ext = ctx.swapChain->extent();
+    const VkFormat fmt = ctx.swapChain->format().format;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        Image& img = ctx.swapChain->image(i);
+        assert(img.handle() != VK_NULL_HANDLE);
+        assert(img.handle() == ctx.swapChain->images()[i]);
+        assert(img.format() == fmt);
+        assert(img.extent().width == ext.width);
+        assert(img.extent().height == ext.height);
+        assert(img.extent().depth == 1);
+        // Wrappers must NOT own the underlying VkImage (swapchain owns it).
+        assert(img.ownsMemory() == false);
+    }
+
+    std::cout << "PASSED\n";
+}
+
+void test_swapchain_image_accessor_recreate() {
+    std::cout << "Testing: SwapChain::image() after recreate()... ";
+
+    // Force a non-trivial recreate. With a hidden GLFW window the surface's
+    // currentExtent will dictate the resulting size, so we don't assert on the
+    // requested values — only that wrappers reflect whatever the new swapchain
+    // ended up at.
+    ctx.swapChain->recreate(640, 480);
+
+    const uint32_t count = ctx.swapChain->imageCount();
+    assert(count >= 2);
+    const VkExtent2D ext = ctx.swapChain->extent();
+    const VkFormat fmt = ctx.swapChain->format().format;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        Image& img = ctx.swapChain->image(i);
+        assert(img.handle() != VK_NULL_HANDLE);
+        assert(img.handle() == ctx.swapChain->images()[i]);
+        assert(img.format() == fmt);
+        assert(img.extent().width == ext.width);
+        assert(img.extent().height == ext.height);
+        assert(img.ownsMemory() == false);
+    }
+
+    std::cout << "PASSED\n";
+}
+
+void test_swapchain_image_out_of_range() {
+    std::cout << "Testing: SwapChain::image() out-of-range throws... ";
+
+    bool threw = false;
+    try {
+        (void)ctx.swapChain->image(ctx.swapChain->imageCount());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    assert(threw);
+
+    std::cout << "PASSED\n";
+}
+
 void test_swapchain_acquire() {
     std::cout << "Testing: SwapChain acquire... ";
 
@@ -643,6 +706,9 @@ int main() {
 
         // SwapChain tests
         test_swapchain_creation();
+        test_swapchain_image_accessor();
+        test_swapchain_image_out_of_range();
+        test_swapchain_image_accessor_recreate();
         test_swapchain_acquire();
 
         // RenderPass tests

@@ -278,6 +278,14 @@ std::vector<uint8_t> rgba;
 surface->colorImage()->readbackToCPU(rgba, pool);  // width * height * 4 bytes
 ```
 
+Swapchain image readback uses the same API via `SwapChain::image(idx) -> Image&`
+(invalidated on `recreate()`, same contract as `imageViews()`):
+```cpp
+auto frame = window->beginFrame();
+window->swapChain()->image(frame->imageIndex)
+    .readbackToCPU(rgba, pool, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+```
+
 ### CommandPool, CommandBuffer
 
 ```cpp
