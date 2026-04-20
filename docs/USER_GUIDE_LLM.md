@@ -363,7 +363,11 @@ GraphicsPipeline::create(device, renderPass, pipelineLayout)
     .cullFront()         | .frontFace(VkFrontFace)
     .cullNone()          | .polygonMode(VkPolygonMode)
     .enableDepth()       | .depthTest(bool) .depthWrite(bool) .depthCompareOp(VkCompareOp)
-    .alphaBlending()     | .blending(bool)
+    .alphaBlending()     | .blending(bool) .blendMode(srcC,dstC,opC,srcA,dstA,opA)
+    // alphaBlending(): color=(SRC_ALPHA,1-SRC_ALPHA), alpha=(ZERO,ONE) — preserves dst alpha
+    // so readback/screenshot of an opaque target stays opaque. Use blendMode(...) directly
+    // if rendering into a target whose alpha channel is meant to be produced (e.g. premult
+    // sprite sheet for later compositing).
     .samples(VkSampleCountFlagBits)       // MUST match render pass
     .dynamicViewportAndScissor()          // Recommended
     .subpass(uint32_t)

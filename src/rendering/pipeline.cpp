@@ -403,10 +403,13 @@ GraphicsPipeline::Builder& GraphicsPipeline::Builder::blendMode(
 }
 
 GraphicsPipeline::Builder& GraphicsPipeline::Builder::alphaBlending() {
+    // Alpha channel: preserve destination alpha so opaque targets stay opaque.
+    // Writing src alpha into dst (src=ONE,dst=ZERO) breaks PNG readback of
+    // swap-chain images: text/overlay pixels get alpha=coverage, not 255.
     return blending(true)
         .blendMode(
             VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD,
-            VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD
+            VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD
         );
 }
 

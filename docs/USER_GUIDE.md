@@ -563,8 +563,19 @@ auto pipeline = finevk::GraphicsPipeline::create(device, renderPass, pipelineLay
 | `.depthTest(bool)` | Enable/disable depth testing |
 | `.depthWrite(bool)` | Enable/disable depth writing |
 | `.samples(count)` | Multi-sampling sample count |
-| `.alphaBlending()` | Standard alpha blending |
+| `.alphaBlending()` | Standard alpha blending (preserves dst alpha) |
 | `.blending(bool)` | Enable/disable blending |
+| `.blendMode(...)` | Custom color+alpha blend factors/ops |
+
+> **`alphaBlending()` alpha-channel behavior:** color uses the classic
+> `(src_alpha, 1-src_alpha)` factors, and alpha uses `(0, 1)` — i.e.
+> destination alpha is *preserved*, not overwritten. This is what you want
+> when compositing onto an opaque target (swap chain, opaque off-screen
+> image) so readbacks/screenshots of the target remain opaque. If you are
+> rendering into a target whose alpha you intend to *produce* (e.g. a
+> premultiplied sprite sheet for later compositing), use `blendMode(...)`
+> directly with `srcAlpha=ONE, dstAlpha=ZERO` (or whatever your pipeline
+> needs).
 | `.dynamicViewportAndScissor()` | Dynamic viewport and scissor |
 
 ---
