@@ -44,8 +44,24 @@ be pure overhead):**
   `VkPrimitiveTopology`, `VkPolygonMode`, etc.
 - GLFW key codes
 
-**Rule of thumb:** does this value identify an object with a Vulkan-tracked
-lifetime? → wrap. Is it just a value describing configuration? → pass through.
+**Rule of thumb:** does this value identify a single object with a Vulkan-tracked
+lifetime? → wrap. Is it a configuration constant/struct, or a **bulk contiguous
+array** passed directly to a `vkCmd*` / `vk*` call? → pass through directly.
+
+## The bulk & zero-translation rule
+
+Never invent redundant finevk enums/constants or wrapper arrays that must be
+translated element-by-element into Vulkan arrays at call time:
+- **Vulkan constants & value structs:** Always use native Vulkan constants
+  (`VK_FORMAT_*`, `VK_IMAGE_LAYOUT_*`, `VK_SHADER_STAGE_*`, etc.) and value
+  structs (`VkBufferCopy`, `VkBufferImageCopy`, `VkImageMemoryBarrier`,
+  `VkPushConstantRange`, etc.) directly.
+- **Bulk operations:** When a Vulkan call takes a contiguous array of handles or
+  descriptors (e.g., `const VkDescriptorSet* sets, uint32_t count`, vertex
+  `VkBuffer` + `VkDeviceSize` arrays, batch barrier/copy arrays), accept the
+  contiguous `const Vk*` pointer/span directly (and provide bulk APIs to
+  amortize command/lock overhead) rather than allocating a `std::vector<Vk*>`
+  to translate an array of wrapper objects.
 
 **Recon before refactoring:** if you're about to change a public signature
 that returns or takes a Vulkan type, first grep the downstream projects
