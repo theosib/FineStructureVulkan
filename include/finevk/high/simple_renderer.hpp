@@ -275,11 +275,11 @@ public:
     SimpleRenderer& operator=(const SimpleRenderer&) = delete;
 
     // Movable
-    SimpleRenderer(SimpleRenderer&&) noexcept = default;
-    SimpleRenderer& operator=(SimpleRenderer&&) noexcept = default;
+    SimpleRenderer(SimpleRenderer&&) noexcept;
+    SimpleRenderer& operator=(SimpleRenderer&&) noexcept;
 
 private:
-    SimpleRenderer() = default;
+    SimpleRenderer();
 
     void recreateResources();
 

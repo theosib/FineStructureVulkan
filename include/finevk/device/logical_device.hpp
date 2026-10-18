@@ -52,6 +52,9 @@ public:
     /// Get the memory allocator
     MemoryAllocator& allocator() { return *allocator_; }
 
+    /// Check if sampler anisotropy was enabled when creating this logical device
+    bool anisotropyEnabled() const { return anisotropyEnabled_; }
+
     /**
      * @brief Get the number of frames in flight
      *
@@ -142,6 +145,9 @@ private:
 
     // Frame configuration (set by Window::bindDevice or manually)
     uint32_t framesInFlight_ = 2;
+
+    // Enabled device features
+    bool anisotropyEnabled_ = false;
 
     // Destruction callbacks for dependent objects
     std::vector<std::pair<size_t, DestructionCallback>> destructionCallbacks_;

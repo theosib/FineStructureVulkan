@@ -1,7 +1,9 @@
 #include "finevk/rendering/pipeline.hpp"
 #include "finevk/rendering/renderpass.hpp"
 #include "finevk/rendering/render_target.hpp"
+#include "finevk/rendering/descriptors.hpp"
 #include "finevk/device/logical_device.hpp"
+#include "finevk/device/command.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <fstream>
@@ -93,6 +95,14 @@ PipelineLayout::Builder& PipelineLayout::Builder::addDescriptorSetLayout(
     return *this;
 }
 
+PipelineLayout::Builder& PipelineLayout::Builder::addDescriptorSetLayout(
+    const DescriptorSetLayout* layout) {
+    if (layout) {
+        setLayouts_.push_back(layout->handle());
+    }
+    return *this;
+}
+
 PipelineLayout::Builder& PipelineLayout::Builder::addPushConstantRange(
     VkShaderStageFlags stages, uint32_t offset, uint32_t size) {
     VkPushConstantRange range{};
@@ -130,6 +140,38 @@ PipelineLayoutPtr PipelineLayout::Builder::build() {
 
 PipelineLayout::Builder PipelineLayout::create(LogicalDevice* device) {
     return Builder(device);
+}
+
+void PipelineLayout::bindDescriptorSets(
+    CommandBuffer* cmd, const VkDescriptorSet* sets,
+    uint32_t count, uint32_t firstSet) const {
+    if (cmd) {
+        bindDescriptorSets(cmd->handle(), sets, count, firstSet);
+    }
+}
+
+void PipelineLayout::bindDescriptorSet(
+    CommandBuffer* cmd, VkDescriptorSet set,
+    uint32_t setIndex) const {
+    if (cmd) {
+        bindDescriptorSet(cmd->handle(), set, setIndex);
+    }
+}
+
+void PipelineLayout::bindDescriptorSet(
+    CommandBuffer* cmd, const DescriptorSet& set,
+    uint32_t setIndex) const {
+    if (cmd) {
+        bindDescriptorSet(cmd->handle(), set.handle(), setIndex);
+    }
+}
+
+void PipelineLayout::pushConstants(
+    CommandBuffer* cmd, VkShaderStageFlags stages,
+    uint32_t offset, uint32_t size, const void* data) const {
+    if (cmd) {
+        pushConstants(cmd->handle(), stages, offset, size, data);
+    }
 }
 
 PipelineLayout::~PipelineLayout() {
@@ -558,6 +600,12 @@ GraphicsPipeline::Builder GraphicsPipeline::create(
     builder.samples(renderTarget->msaaSamples());
 
     return builder;
+}
+
+void GraphicsPipeline::bind(CommandBuffer* cmd) const {
+    if (cmd) {
+        bind(cmd->handle());
+    }
 }
 
 GraphicsPipeline::~GraphicsPipeline() {

@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <type_traits>
 
 namespace finevk {
 
@@ -91,7 +92,19 @@ public:
      * @param alloc The allocation to release
      * @param fence Fence that will signal when GPU is done (can be VK_NULL_HANDLE for immediate release)
      */
-    void release(StagingAllocation& alloc, VkFence fence);
+    void release(StagingAllocation& alloc, VkFence fence = VK_NULL_HANDLE);
+    void release(StagingAllocation& alloc, const Fence& fence);
+    void release(StagingAllocation& alloc, const FencePtr& fence) {
+        if (fence) release(alloc, *fence);
+        else release(alloc, VK_NULL_HANDLE);
+    }
+    template<typename F, std::enable_if_t<
+        std::is_same_v<std::decay_t<F>, Fence*> ||
+        std::is_same_v<std::decay_t<F>, const Fence*>, int> = 0>
+    void release(StagingAllocation& alloc, F fence) {
+        if (fence) release(alloc, *fence);
+        else release(alloc, VK_NULL_HANDLE);
+    }
 
     /**
      * @brief Process completed transfers and reclaim staging buffers

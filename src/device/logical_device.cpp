@@ -87,12 +87,14 @@ LogicalDevice::LogicalDevice(LogicalDevice&& other) noexcept
     , transferQueue_(other.transferQueue_)
     , allocator_(std::move(other.allocator_))
     , defaultCommandPool_(std::move(other.defaultCommandPool_))
-    , framesInFlight_(other.framesInFlight_) {
+    , framesInFlight_(other.framesInFlight_)
+    , anisotropyEnabled_(other.anisotropyEnabled_) {
     other.device_ = VK_NULL_HANDLE;
     other.graphicsQueue_ = nullptr;
     other.presentQueue_ = nullptr;
     other.computeQueue_ = nullptr;
     other.transferQueue_ = nullptr;
+    other.anisotropyEnabled_ = false;
 }
 
 LogicalDevice& LogicalDevice::operator=(LogicalDevice&& other) noexcept {
@@ -108,11 +110,13 @@ LogicalDevice& LogicalDevice::operator=(LogicalDevice&& other) noexcept {
         allocator_ = std::move(other.allocator_);
         defaultCommandPool_ = std::move(other.defaultCommandPool_);
         framesInFlight_ = other.framesInFlight_;
+        anisotropyEnabled_ = other.anisotropyEnabled_;
         other.device_ = VK_NULL_HANDLE;
         other.graphicsQueue_ = nullptr;
         other.presentQueue_ = nullptr;
         other.computeQueue_ = nullptr;
         other.transferQueue_ = nullptr;
+        other.anisotropyEnabled_ = false;
     }
     return *this;
 }
@@ -252,6 +256,7 @@ LogicalDevicePtr LogicalDeviceBuilder::build() {
     auto device = LogicalDevicePtr(new LogicalDevice());
     device->device_ = vkDevice;
     device->physical_ = physical_;
+    device->anisotropyEnabled_ = (enabledFeatures_.samplerAnisotropy == VK_TRUE);
 
     // Get queues
     VkQueue vkGraphicsQueue;

@@ -6,6 +6,7 @@
 #include "finevk/rendering/render_target.hpp"
 #include "finevk/rendering/renderpass.hpp"
 #include "finevk/rendering/framebuffer.hpp"
+#include "finevk/rendering/sync.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <stdexcept>
@@ -494,8 +495,9 @@ void ImmediateCommands::submit() {
     VkCommandBuffer buffer = cmd_->handle();
     submitInfo.pCommandBuffers = &buffer;
 
-    pool_->queue()->submit(submitInfo);
-    pool_->queue()->waitIdle();
+    Fence fence(pool_->device(), false);
+    pool_->queue()->submit(submitInfo, fence.handle());
+    fence.wait();
 
     submitted_ = true;
 }

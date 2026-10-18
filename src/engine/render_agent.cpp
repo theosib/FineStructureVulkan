@@ -137,8 +137,7 @@ void RenderAgent::renderOne(CommandBuffer& cmd, const Renderable& renderable) {
 
     // Bind pipeline if provided
     if (renderable.pipeline) {
-        VkCommandBuffer vkCmd = cmd.handle();
-        renderable.pipeline->bind(vkCmd);
+        renderable.pipeline->bind(cmd);
     }
 
     // Bind material descriptors if provided

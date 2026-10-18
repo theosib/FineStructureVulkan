@@ -1,6 +1,7 @@
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/logical_device.hpp"
 #include "finevk/device/command.hpp"
+#include "finevk/device/staging_pool.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <cstring>
@@ -201,22 +202,31 @@ void Buffer::upload(const void* data, VkDeviceSize dataSize, VkDeviceSize offset
 }
 
 void Buffer::upload(const void* data, VkDeviceSize dataSize, VkDeviceSize offset,
-                    CommandPool* commandPool) {
+                    CommandPool* commandPool, StagingPool* stagingPool) {
     if (isMappable()) {
         // Direct copy for CPU-visible buffers
         std::memcpy(static_cast<char*>(allocation_.mappedPtr) + offset, data, dataSize);
+    } else if (stagingPool) {
+        StagingAllocation staging = stagingPool->acquire(dataSize);
+        std::memcpy(staging.mappedPtr, data, dataSize);
+
+        copyFrom(*staging.buffer, dataSize, commandPool, staging.offset, offset);
+
+        stagingPool->release(staging, VK_NULL_HANDLE);
+        stagingPool->processCompleted();
     } else {
         // Create staging buffer and copy
         auto staging = createStagingBuffer(device_, dataSize);
         std::memcpy(staging->mappedPtr(), data, dataSize);
 
-        copyFrom(*staging, dataSize, commandPool);
+        copyFrom(*staging, dataSize, commandPool, 0, offset);
     }
 }
 
-void Buffer::copyFrom(Buffer& src, VkDeviceSize copySize, CommandPool* commandPool) {
+void Buffer::copyFrom(Buffer& src, VkDeviceSize copySize, CommandPool* commandPool,
+                      VkDeviceSize srcOffset, VkDeviceSize dstOffset) {
     auto imm = commandPool->beginImmediate();
-    imm.cmd().copyBuffer(src, *this, copySize);
+    imm.cmd().copyBuffer(src, *this, copySize, srcOffset, dstOffset);
     imm.submit();
 }
 

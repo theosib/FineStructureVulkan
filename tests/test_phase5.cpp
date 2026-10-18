@@ -558,6 +558,14 @@ void test_pipeline_with_shaders() {
     assert(pipeline != nullptr);
     assert(pipeline->handle() != VK_NULL_HANDLE);
 
+    // Verify GraphicsPipeline::bind overloads (CommandBuffer&, CommandBuffer*, CommandBufferPtr)
+    auto cmd = ctx.commandPool->allocate();
+    cmd->begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    pipeline->bind(*cmd);
+    pipeline->bind(cmd.get());
+    pipeline->bind(cmd);
+    cmd->end();
+
     std::cout << "PASSED\n";
 }
 

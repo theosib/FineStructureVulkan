@@ -317,7 +317,7 @@ Sampler* SimpleRenderer::defaultSampler() {
             .mipLod(0.0f, VK_LOD_CLAMP_NONE);
 
         // Only enable anisotropy if the feature was enabled on the device
-        if (physDevice->capabilities().supportsAnisotropy()) {
+        if (device()->anisotropyEnabled()) {
             float maxAnisotropy = physDevice->capabilities().properties.limits.maxSamplerAnisotropy;
             builder.anisotropy(maxAnisotropy);
         }
@@ -326,6 +326,10 @@ Sampler* SimpleRenderer::defaultSampler() {
     }
     return defaultSampler_.get();
 }
+
+SimpleRenderer::SimpleRenderer() = default;
+SimpleRenderer::SimpleRenderer(SimpleRenderer&&) noexcept = default;
+SimpleRenderer& SimpleRenderer::operator=(SimpleRenderer&&) noexcept = default;
 
 SimpleRenderer::~SimpleRenderer() {
     auto* dev = device();

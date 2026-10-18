@@ -68,6 +68,9 @@ public:
 
         /// Add a descriptor set layout
         Builder& addDescriptorSetLayout(VkDescriptorSetLayout layout);
+        Builder& addDescriptorSetLayout(const DescriptorSetLayout* layout);
+        Builder& addDescriptorSetLayout(const DescriptorSetLayout& layout) { return addDescriptorSetLayout(&layout); }
+        Builder& addDescriptorSetLayout(const DescriptorSetLayoutPtr& layout) { return addDescriptorSetLayout(layout.get()); }
 
         /// Add a push constant range
         Builder& addPushConstantRange(VkShaderStageFlags stages,
@@ -99,6 +102,28 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_,
                                 firstSet, count, sets, 0, nullptr);
     }
+    void bindDescriptorSets(CommandBuffer* cmd, const VkDescriptorSet* sets,
+                            uint32_t count, uint32_t firstSet = 0) const;
+    void bindDescriptorSets(CommandBuffer& cmd, const VkDescriptorSet* sets,
+                            uint32_t count, uint32_t firstSet = 0) const {
+        bindDescriptorSets(&cmd, sets, count, firstSet);
+    }
+    void bindDescriptorSets(const CommandBufferPtr& cmd, const VkDescriptorSet* sets,
+                            uint32_t count, uint32_t firstSet = 0) const {
+        bindDescriptorSets(cmd.get(), sets, count, firstSet);
+    }
+    void bindDescriptorSets(CommandBuffer* cmd, const std::vector<VkDescriptorSet>& sets,
+                            uint32_t firstSet = 0) const {
+        bindDescriptorSets(cmd, sets.data(), static_cast<uint32_t>(sets.size()), firstSet);
+    }
+    void bindDescriptorSets(CommandBuffer& cmd, const std::vector<VkDescriptorSet>& sets,
+                            uint32_t firstSet = 0) const {
+        bindDescriptorSets(&cmd, sets.data(), static_cast<uint32_t>(sets.size()), firstSet);
+    }
+    void bindDescriptorSets(const CommandBufferPtr& cmd, const std::vector<VkDescriptorSet>& sets,
+                            uint32_t firstSet = 0) const {
+        bindDescriptorSets(cmd.get(), sets.data(), static_cast<uint32_t>(sets.size()), firstSet);
+    }
 
     /// Bind a single descriptor set
     void bindDescriptorSet(VkCommandBuffer cmd, VkDescriptorSet set,
@@ -106,12 +131,75 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_,
                                 setIndex, 1, &set, 0, nullptr);
     }
+    void bindDescriptorSet(CommandBuffer* cmd, VkDescriptorSet set,
+                           uint32_t setIndex = 0) const;
+    void bindDescriptorSet(CommandBuffer& cmd, VkDescriptorSet set,
+                           uint32_t setIndex = 0) const {
+        bindDescriptorSet(&cmd, set, setIndex);
+    }
+    void bindDescriptorSet(const CommandBufferPtr& cmd, VkDescriptorSet set,
+                           uint32_t setIndex = 0) const {
+        bindDescriptorSet(cmd.get(), set, setIndex);
+    }
+    void bindDescriptorSet(CommandBuffer* cmd, const DescriptorSet& set,
+                           uint32_t setIndex = 0) const;
+    void bindDescriptorSet(CommandBuffer& cmd, const DescriptorSet& set,
+                           uint32_t setIndex = 0) const {
+        bindDescriptorSet(&cmd, set, setIndex);
+    }
+    void bindDescriptorSet(const CommandBufferPtr& cmd, const DescriptorSet& set,
+                           uint32_t setIndex = 0) const {
+        bindDescriptorSet(cmd.get(), set, setIndex);
+    }
+    void bindDescriptorSet(CommandBuffer* cmd, const DescriptorSetPtr& set,
+                           uint32_t setIndex = 0) const {
+        if (set) bindDescriptorSet(cmd, *set, setIndex);
+    }
+    void bindDescriptorSet(CommandBuffer& cmd, const DescriptorSetPtr& set,
+                           uint32_t setIndex = 0) const {
+        if (set) bindDescriptorSet(&cmd, *set, setIndex);
+    }
+    void bindDescriptorSet(const CommandBufferPtr& cmd, const DescriptorSetPtr& set,
+                           uint32_t setIndex = 0) const {
+        if (set) bindDescriptorSet(cmd.get(), *set, setIndex);
+    }
+
+    /// Push constants to a command buffer (raw bytes)
+    void pushConstants(VkCommandBuffer cmd, VkShaderStageFlags stages,
+                       uint32_t offset, uint32_t size, const void* data) const {
+        vkCmdPushConstants(cmd, layout_, stages, offset, size, data);
+    }
+    void pushConstants(CommandBuffer* cmd, VkShaderStageFlags stages,
+                       uint32_t offset, uint32_t size, const void* data) const;
+    void pushConstants(CommandBuffer& cmd, VkShaderStageFlags stages,
+                       uint32_t offset, uint32_t size, const void* data) const {
+        pushConstants(&cmd, stages, offset, size, data);
+    }
+    void pushConstants(const CommandBufferPtr& cmd, VkShaderStageFlags stages,
+                       uint32_t offset, uint32_t size, const void* data) const {
+        pushConstants(cmd.get(), stages, offset, size, data);
+    }
 
     /// Push constants to a command buffer
     template<typename T>
     void pushConstants(VkCommandBuffer cmd, VkShaderStageFlags stages,
                        const T& data, uint32_t offset = 0) const {
         vkCmdPushConstants(cmd, layout_, stages, offset, sizeof(T), &data);
+    }
+    template<typename T>
+    void pushConstants(CommandBuffer* cmd, VkShaderStageFlags stages,
+                       const T& data, uint32_t offset = 0) const {
+        pushConstants(cmd, stages, offset, sizeof(T), &data);
+    }
+    template<typename T>
+    void pushConstants(CommandBuffer& cmd, VkShaderStageFlags stages,
+                       const T& data, uint32_t offset = 0) const {
+        pushConstants(&cmd, stages, offset, sizeof(T), &data);
+    }
+    template<typename T>
+    void pushConstants(const CommandBufferPtr& cmd, VkShaderStageFlags stages,
+                       const T& data, uint32_t offset = 0) const {
+        pushConstants(cmd.get(), stages, offset, sizeof(T), &data);
     }
 
     /// Destructor
@@ -338,6 +426,9 @@ public:
     void bind(VkCommandBuffer cmd) const {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     }
+    void bind(CommandBuffer* cmd) const;
+    void bind(CommandBuffer& cmd) const { bind(&cmd); }
+    void bind(const CommandBufferPtr& cmd) const { bind(cmd.get()); }
 
     /// Destructor
     ~GraphicsPipeline();

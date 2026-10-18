@@ -11,6 +11,8 @@
  * - SimpleRenderer creation (requires window)
  */
 
+// Verify standalone header self-containment before including finevk.hpp
+#include <finevk/high/simple_renderer.hpp>
 #include <finevk/finevk.hpp>
 
 #include <GLFW/glfw3.h>

@@ -116,7 +116,7 @@ void TextRenderer::createDescriptorResources() {
 
 void TextRenderer::createPipeline() {
     pipelineLayout_ = PipelineLayout::create(device_)
-        .addDescriptorSetLayout(descriptorSetLayout_->handle())
+        .addDescriptorSetLayout(descriptorSetLayout_)
         .build();
 
     auto& builder = GraphicsPipeline::create(device_, renderPass_, pipelineLayout_.get())

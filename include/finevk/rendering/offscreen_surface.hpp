@@ -42,7 +42,7 @@ class Sampler;
  * surface->beginRenderPass({0, 0, 0, 1});
  * // Draw 3D scene...
  * surface->endRenderPass();
- * surface->endFrame();  // Submits and waits for GPU
+ * surface->endFrame();  // Submits with fence; next beginFrame() or waitIdle() waits
  *
  * // Use the result as a texture:
  * auto* view = surface->colorImageView();  // For descriptor sets
@@ -134,8 +134,8 @@ public:
     /**
      * @brief Resize the off-screen surface
      *
-     * Waits for current rendering to complete, then recreates all resources
-     * at the new size. The render pass is preserved (formats don't change).
+     * Waits for current rendering to complete, flushes deferred deletions,
+     * and recreates the color image and render target at the new size.
      */
     void resize(uint32_t width, uint32_t height);
 
@@ -151,7 +151,7 @@ public:
     OffscreenSurface& operator=(OffscreenSurface&&) noexcept;
 
 private:
-    OffscreenSurface() : deletionQueue_(1) {}
+    OffscreenSurface();
 
     LogicalDevice* device_ = nullptr;
     CommandPool* commandPool_ = nullptr;  // Non-owning (device's default)

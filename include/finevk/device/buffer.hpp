@@ -92,12 +92,33 @@ public:
     /// For GPU-only buffers, this uses an internal staging buffer
     void upload(const void* data, VkDeviceSize size, VkDeviceSize offset = 0);
 
-    /// Upload data using a provided command pool for staging
+    /// Upload data using a provided command pool (and optional staging pool) for staging
     void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
-                CommandPool* commandPool);
+                CommandPool* commandPool, StagingPool* stagingPool = nullptr);
+    void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
+                CommandPool& commandPool, StagingPool* stagingPool = nullptr) {
+        upload(data, size, offset, &commandPool, stagingPool);
+    }
+    void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
+                const CommandPoolPtr& commandPool, StagingPool* stagingPool = nullptr) {
+        upload(data, size, offset, commandPool.get(), stagingPool);
+    }
+    void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
+                CommandPool* commandPool, StagingPool& stagingPool) {
+        upload(data, size, offset, commandPool, &stagingPool);
+    }
+    void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
+                CommandPool& commandPool, StagingPool& stagingPool) {
+        upload(data, size, offset, &commandPool, &stagingPool);
+    }
+    void upload(const void* data, VkDeviceSize size, VkDeviceSize offset,
+                const CommandPoolPtr& commandPool, const StagingPoolPtr& stagingPool) {
+        upload(data, size, offset, commandPool.get(), stagingPool.get());
+    }
 
     /// Copy data from a staging buffer
-    void copyFrom(Buffer& src, VkDeviceSize size, CommandPool* commandPool);
+    void copyFrom(Buffer& src, VkDeviceSize size, CommandPool* commandPool,
+                  VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
 
     /// Destructor
     ~Buffer();

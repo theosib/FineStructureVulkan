@@ -13,6 +13,9 @@ class LogicalDevice;
 class CommandPool;
 class CommandBuffer;
 class Buffer;
+class StagingPool;
+class DeletionQueue;
+class RenderSurface;
 
 // Forward declare for type aliases
 class RawMesh;
@@ -96,7 +99,10 @@ public:
      * @brief Update mesh data
      *
      * If the new data fits within capacity, buffers are reused.
-     * Otherwise, new buffers are allocated.
+     * Otherwise, new buffers are allocated (and if deletionQueue or surface is
+     * provided, old buffers are queued for GPU-safe deferred deletion rather than
+     * destroyed while in flight). Both vertex and index staging copies are recorded
+     * in a single command buffer submission.
      *
      * Index data must match the index type used at creation (16-bit or 32-bit).
      *
@@ -105,10 +111,58 @@ public:
      * @param vertexCount Number of vertices (not bytes)
      * @param indexData Pointer to index data (void* - uses stored indexType_)
      * @param indexCount Number of indices
+     * @param stagingPool Optional staging pool to reuse staging memory
+     * @param deletionQueue Optional deletion queue for retiring replaced buffers safely
      */
+    void update(CommandPool* commandPool,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool* stagingPool = nullptr,
+                DeletionQueue* deletionQueue = nullptr);
     void update(CommandPool& commandPool,
                 const void* vertexData, size_t vertexCount,
-                const void* indexData, size_t indexCount);
+                const void* indexData, size_t indexCount,
+                StagingPool* stagingPool = nullptr,
+                DeletionQueue* deletionQueue = nullptr) {
+        update(&commandPool, vertexData, vertexCount, indexData, indexCount, stagingPool, deletionQueue);
+    }
+    void update(const CommandPoolPtr& commandPool,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool* stagingPool = nullptr,
+                DeletionQueue* deletionQueue = nullptr) {
+        update(commandPool.get(), vertexData, vertexCount, indexData, indexCount, stagingPool, deletionQueue);
+    }
+    void update(CommandPool& commandPool,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool& stagingPool,
+                DeletionQueue* deletionQueue = nullptr) {
+        update(&commandPool, vertexData, vertexCount, indexData, indexCount, &stagingPool, deletionQueue);
+    }
+    void update(CommandPool& commandPool,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool& stagingPool,
+                DeletionQueue& deletionQueue) {
+        update(&commandPool, vertexData, vertexCount, indexData, indexCount, &stagingPool, &deletionQueue);
+    }
+    void update(CommandPool& commandPool,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                DeletionQueue& deletionQueue) {
+        update(&commandPool, vertexData, vertexCount, indexData, indexCount, nullptr, &deletionQueue);
+    }
+    void update(RenderSurface* surface,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool* stagingPool = nullptr);
+    void update(RenderSurface& surface,
+                const void* vertexData, size_t vertexCount,
+                const void* indexData, size_t indexCount,
+                StagingPool* stagingPool = nullptr) {
+        update(&surface, vertexData, vertexCount, indexData, indexCount, stagingPool);
+    }
 
     /// Destructor
     ~RawMesh() = default;
@@ -124,6 +178,11 @@ public:
 private:
     friend class Builder;
     RawMesh() = default;
+
+    void uploadBuffers(CommandPool* commandPool,
+                       const void* vertexData, VkDeviceSize vertexBytes,
+                       const void* indexData, VkDeviceSize indexBytes,
+                       StagingPool* stagingPool);
 
     LogicalDevice* device_ = nullptr;
     BufferPtr vertexBuffer_;
@@ -200,8 +259,22 @@ public:
      * @throws std::runtime_error if vertexLayout() not called
      * @throws std::runtime_error if vertices() not called
      */
-    RawMeshPtr build(CommandPool* commandPool);
-    RawMeshPtr build(CommandPool& commandPool) { return build(&commandPool); }
+    RawMeshPtr build(CommandPool* commandPool, StagingPool* stagingPool = nullptr);
+    RawMeshPtr build(CommandPool& commandPool, StagingPool* stagingPool = nullptr) {
+        return build(&commandPool, stagingPool);
+    }
+    RawMeshPtr build(const CommandPoolPtr& commandPool, StagingPool* stagingPool = nullptr) {
+        return build(commandPool.get(), stagingPool);
+    }
+    RawMeshPtr build(CommandPool* commandPool, StagingPool& stagingPool) {
+        return build(commandPool, &stagingPool);
+    }
+    RawMeshPtr build(CommandPool& commandPool, StagingPool& stagingPool) {
+        return build(&commandPool, &stagingPool);
+    }
+    RawMeshPtr build(const CommandPoolPtr& commandPool, const StagingPoolPtr& stagingPool) {
+        return build(commandPool.get(), stagingPool.get());
+    }
 
 private:
     LogicalDevice* device_;

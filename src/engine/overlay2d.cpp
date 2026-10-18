@@ -173,7 +173,7 @@ void Overlay2D::createDescriptorResources() {
 void Overlay2D::createPipeline(const std::string& vertPath, const std::string& fragPath) {
     // Create pipeline layout
     pipelineLayout_ = PipelineLayout::create(device_)
-        .addDescriptorSetLayout(descriptorSetLayout_->handle())
+        .addDescriptorSetLayout(descriptorSetLayout_)
         .build();
 
     // Determine shader paths

@@ -55,7 +55,7 @@ Sampler::Builder& Sampler::Builder::addressMode(
 }
 
 Sampler::Builder& Sampler::Builder::anisotropy(float maxAniso) {
-    if (device_->physicalDevice()->capabilities().supportsAnisotropy()) {
+    if (device_->anisotropyEnabled()) {
         createInfo_.anisotropyEnable = VK_TRUE;
         float deviceMax = device_->physicalDevice()->capabilities()
             .properties.limits.maxSamplerAnisotropy;

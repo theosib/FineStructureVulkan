@@ -1,6 +1,7 @@
 #include "finevk/device/staging_pool.hpp"
 #include "finevk/device/buffer.hpp"
 #include "finevk/device/logical_device.hpp"
+#include "finevk/rendering/sync.hpp"
 #include "finevk/core/logging.hpp"
 
 #include <stdexcept>
@@ -81,6 +82,10 @@ void StagingPool::release(StagingAllocation& alloc, VkFence fence) {
     pendingReleases_ = std::move(temp);
 
     alloc.invalidate();
+}
+
+void StagingPool::release(StagingAllocation& alloc, const Fence& fence) {
+    release(alloc, fence.handle());
 }
 
 void StagingPool::processCompleted() {

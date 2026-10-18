@@ -78,6 +78,10 @@ std::unique_ptr<OffscreenSurface> OffscreenSurface::Builder::build() {
 // OffscreenSurface
 // ============================================================================
 
+OffscreenSurface::OffscreenSurface()
+    : deletionQueue_(1) {
+}
+
 OffscreenSurface::Builder OffscreenSurface::create(LogicalDevice* device) {
     return Builder(device);
 }
