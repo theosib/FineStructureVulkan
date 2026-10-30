@@ -338,6 +338,25 @@ bool Window::isFocused() const {
     return glfwGetWindowAttrib(window_, GLFW_FOCUSED) == GLFW_TRUE;
 }
 
+bool Window::spansScreen() const {
+    if (glfwGetWindowMonitor(window_)) return true;
+
+    int x, y, width, height;
+    glfwGetWindowPos(window_, &x, &y);
+    glfwGetWindowSize(window_, &width, &height);
+    int centerX = x + width / 2;
+
+    int count = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&count);
+    for (int i = 0; i < count; ++i) {
+        // Work area and window size are both in screen coordinates; a video mode may not be
+        int areaX, areaY, areaWidth, areaHeight;
+        glfwGetMonitorWorkarea(monitors[i], &areaX, &areaY, &areaWidth, &areaHeight);
+        if (centerX >= areaX && centerX < areaX + areaWidth) return width >= areaWidth;
+    }
+    return false;
+}
+
 VkExtent2D Window::extent() const {
     if (swapChain_) {
         return swapChain_->extent();

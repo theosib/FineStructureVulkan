@@ -222,6 +222,10 @@ public:
     /// Check if window is focused
     bool isFocused() const;
 
+    /// True if the window is as wide as its screen. Unlike asking GLFW for the window's
+    /// monitor, this also sees macOS native full-screen and maximized windows.
+    bool spansScreen() const;
+
     // ========================================================================
     // Device and surface access
     // ========================================================================
