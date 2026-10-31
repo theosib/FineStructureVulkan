@@ -80,7 +80,9 @@ void Camera::setPerspective(float fovDegrees, float aspect, float nearPlane, flo
     nearPlane_ = nearPlane;
     farPlane_ = farPlane;
 
-    state_.projection = glm::perspective(
+    // Explicitly 0..1 depth. Plain glm::perspective gives OpenGL's -1..1, and Vulkan clips what
+    // falls below 0, which puts the real near plane at about twice nearPlane.
+    state_.projection = glm::perspectiveRH_ZO(
         glm::radians(fovDegrees),
         aspect,
         nearPlane,
@@ -101,10 +103,8 @@ void Camera::setOrthographic(float left, float right, float bottom, float top,
     nearPlane_ = nearPlane;
     farPlane_ = farPlane;
 
-    state_.projection = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-
     // Vulkan depth range is [0, 1]
-    state_.projection[2][2] *= -1;
+    state_.projection = glm::orthoRH_ZO(left, right, bottom, top, nearPlane, farPlane);
 }
 
 // =============================================================================
@@ -286,12 +286,12 @@ void Camera::extractFrustumPlanesFrom(const glm::mat4& vp,
         vp[3][3] - vp[3][1]
     );
 
-    // Near plane
+    // Near plane (z >= 0, since Vulkan depth starts at 0 rather than -w)
     outPlanes[4] = glm::vec4(
-        vp[0][3] + vp[0][2],
-        vp[1][3] + vp[1][2],
-        vp[2][3] + vp[2][2],
-        vp[3][3] + vp[3][2]
+        vp[0][2],
+        vp[1][2],
+        vp[2][2],
+        vp[3][2]
     );
 
     // Far plane
