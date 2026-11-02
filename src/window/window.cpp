@@ -400,6 +400,7 @@ void Window::toggleFullscreen() {
 
     GLFWmonitor* screen = screenUnder(window_);
     if (!screen) screen = glfwGetPrimaryMonitor();
+    if (!screen) return;  // A desktop with nothing plugged in
 
 #if !defined(_WIN32)
     // The desktop hasn't changed, so losing focus has nothing to give back. GLFW would minimize
