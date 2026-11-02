@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstring>
 #include <array>
+#include <stdexcept>
 
 namespace finevk {
 

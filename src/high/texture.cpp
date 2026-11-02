@@ -10,6 +10,7 @@
 
 #include <stdexcept>
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 
 namespace finevk {

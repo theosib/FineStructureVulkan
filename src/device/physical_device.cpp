@@ -193,11 +193,15 @@ bool DeviceCapabilities::supportsFeature(
 int DeviceCapabilities::score(VkSurfaceKHR surface) const {
     int score = 0;
 
-    // Discrete GPUs are strongly preferred
+    // The kind of device decides, and everything below only separates two of a kind. These dwarf
+    // the memory term on purpose: llvmpipe reports all of system RAM as device-local, and a CPU
+    // must never beat a real GPU however much RAM the machine has.
     if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-        score += 10000;
+        score += 40000000;
     } else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-        score += 1000;
+        score += 20000000;
+    } else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU) {
+        score += 10000000;
     }
 
     // More VRAM is better
