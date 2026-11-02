@@ -53,6 +53,10 @@ public:
         /// Set old swap chain for recreation
         Builder& oldSwapChain(SwapChain* old);
 
+        /// Size to use where the surface leaves it to us, as Wayland's does: the window's
+        /// framebuffer size. Where the surface has a size of its own, that wins.
+        Builder& extent(uint32_t width, uint32_t height);
+
         /// Build the swap chain
         SwapChainPtr build();
 
@@ -64,6 +68,7 @@ public:
         uint32_t imageCount_ = 3;
         bool vsync_ = true;
         SwapChain* oldSwapChain_ = nullptr;
+        VkExtent2D extent_ = {800, 600};
     };
 
     /// Create a builder for a swap chain

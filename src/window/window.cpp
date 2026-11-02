@@ -8,6 +8,7 @@
 #include "finevk/core/logging.hpp"
 
 #include <GLFW/glfw3.h>
+#include <algorithm>
 #include <stdexcept>
 
 #if defined(__APPLE__)
@@ -263,9 +264,13 @@ void Window::createSurface() {
 }
 
 void Window::createSwapChain() {
+    // Wayland's surface has no size of its own, so the swap chain takes the window's
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window_, &width, &height);
     swapChain_ = SwapChain::create(device_, *surface_)
         .vsync(config_.vsync)
         .imageCount(config_.framesInFlight + 1)
+        .extent(static_cast<uint32_t>(std::max(width, 1)), static_cast<uint32_t>(std::max(height, 1)))
         .build();
 }
 

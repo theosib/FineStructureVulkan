@@ -69,6 +69,11 @@ SwapChain::Builder& SwapChain::Builder::oldSwapChain(SwapChain* old) {
     return *this;
 }
 
+SwapChain::Builder& SwapChain::Builder::extent(uint32_t width, uint32_t height) {
+    extent_ = {width, height};
+    return *this;
+}
+
 SwapChainPtr SwapChain::Builder::build() {
     PhysicalDevice* physicalDevice = device_->physicalDevice();
     SwapChainSupport support = physicalDevice->querySwapChainSupport(surface_->handle());
@@ -101,11 +106,11 @@ SwapChainPtr SwapChain::Builder::build() {
     if (support.capabilities.currentExtent.width != UINT32_MAX) {
         extent = support.capabilities.currentExtent;
     } else {
-        // Use default or window size
-        extent.width = std::clamp(800u,
+        // The surface leaves it to us, as Wayland's does
+        extent.width = std::clamp(extent_.width,
             support.capabilities.minImageExtent.width,
             support.capabilities.maxImageExtent.width);
-        extent.height = std::clamp(600u,
+        extent.height = std::clamp(extent_.height,
             support.capabilities.minImageExtent.height,
             support.capabilities.maxImageExtent.height);
     }
