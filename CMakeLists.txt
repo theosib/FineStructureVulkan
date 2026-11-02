@@ -11,7 +11,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # =============================================================================
 option(FINEVK_BUILD_TESTS "Build tests" ON)
 option(FINEVK_BUILD_EXAMPLES "Build examples" ON)
-option(FINEVK_BUILD_SHARED "Build shared libraries (.so/.dylib/.dll)" ON)
+# Not on Windows by default: the DLL's import library would be finevk-core.lib, the static one's name
+if(WIN32)
+    option(FINEVK_BUILD_SHARED "Build shared libraries (.so/.dylib/.dll)" OFF)
+else()
+    option(FINEVK_BUILD_SHARED "Build shared libraries (.so/.dylib/.dll)" ON)
+endif()
 option(FINEVK_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
 
 # =============================================================================
@@ -187,7 +192,10 @@ function(configure_finevk_core_target TARGET_NAME)
         target_compile_definitions(${TARGET_NAME} PUBLIC VK_ENABLE_BETA_EXTENSIONS)
         target_link_libraries(${TARGET_NAME} PUBLIC objc)
     elseif(WIN32)
-        target_compile_definitions(${TARGET_NAME} PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+        # Not VK_USE_PLATFORM_WIN32_KHR: GLFW makes the surface, and that define brings windows.h into
+        # every file, whose macros rename DeviceCapabilities and break std::min. These keep any
+        # windows.h that does come in from doing that.
+        target_compile_definitions(${TARGET_NAME} PUBLIC NOMINMAX NOGDI WIN32_LEAN_AND_MEAN)
     elseif(UNIX)
         target_compile_definitions(${TARGET_NAME} PUBLIC VK_USE_PLATFORM_XCB_KHR)
     endif()
@@ -202,6 +210,9 @@ function(configure_finevk_core_target TARGET_NAME)
         target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wpedantic)
     elseif(MSVC)
         target_compile_options(${TARGET_NAME} PRIVATE /W4)
+    endif()
+    if(MSVC)
+        target_compile_options(${TARGET_NAME} PUBLIC /utf-8 /permissive- /Zc:__cplusplus)
     endif()
 endfunction()
 
