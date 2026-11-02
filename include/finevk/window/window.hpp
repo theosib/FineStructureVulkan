@@ -226,6 +226,10 @@ public:
     /// monitor, this also sees macOS native full-screen and maximized windows.
     bool spansScreen() const;
 
+    /// Fill the screen the window is on with no title bar, or go back to how it was. The screen
+    /// stays at the resolution it's at. On macOS this is the window's green button.
+    void toggleFullscreen();
+
     // ========================================================================
     // Device and surface access
     // ========================================================================
@@ -438,6 +442,10 @@ private:
     uint32_t currentFrameIndex_ = 0;
     uint32_t currentImageIndex_ = 0;
     bool framebufferResized_ = false;
+
+    // Where the window goes back to after full screen, in screen coordinates
+    glm::ivec2 windowedPos_{0, 0};
+    glm::ivec2 windowedSize_{0, 0};
 
     // Device destruction callback registration
     size_t deviceDestructionCallbackId_ = 0;

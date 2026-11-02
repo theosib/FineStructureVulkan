@@ -10,7 +10,39 @@
 #include <GLFW/glfw3.h>
 #include <stdexcept>
 
+#if defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#include <GLFW/glfw3native.h>
+#include <objc/message.h>
+#endif
+
 namespace finevk {
+
+namespace {
+
+/// The screen under the middle of a window, or null if it's off all of them
+GLFWmonitor* screenUnder(GLFWwindow* window) {
+    int x, y, width, height;
+    glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &width, &height);
+    int centerX = x + width / 2;
+    int centerY = y + height / 2;
+
+    int count = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&count);
+    for (int i = 0; i < count; ++i) {
+        // Work area and window size are both in screen coordinates; a video mode may not be
+        int areaX, areaY, areaWidth, areaHeight;
+        glfwGetMonitorWorkarea(monitors[i], &areaX, &areaY, &areaWidth, &areaHeight);
+        if (centerX >= areaX && centerX < areaX + areaWidth &&
+            centerY >= areaY && centerY < areaY + areaHeight) {
+            return monitors[i];
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
 
 // ============================================================================
 // Builder implementation
@@ -341,20 +373,45 @@ bool Window::isFocused() const {
 bool Window::spansScreen() const {
     if (glfwGetWindowMonitor(window_)) return true;
 
-    int x, y, width, height;
-    glfwGetWindowPos(window_, &x, &y);
-    glfwGetWindowSize(window_, &width, &height);
-    int centerX = x + width / 2;
+    GLFWmonitor* screen = screenUnder(window_);
+    if (!screen) return false;
 
-    int count = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&count);
-    for (int i = 0; i < count; ++i) {
-        // Work area and window size are both in screen coordinates; a video mode may not be
-        int areaX, areaY, areaWidth, areaHeight;
-        glfwGetMonitorWorkarea(monitors[i], &areaX, &areaY, &areaWidth, &areaHeight);
-        if (centerX >= areaX && centerX < areaX + areaWidth) return width >= areaWidth;
+    int width, height;
+    glfwGetWindowSize(window_, &width, &height);
+    int areaX, areaY, areaWidth, areaHeight;
+    glfwGetMonitorWorkarea(screen, &areaX, &areaY, &areaWidth, &areaHeight);
+    return width >= areaWidth;
+}
+
+void Window::toggleFullscreen() {
+#if defined(__APPLE__)
+    // GLFW's own full screen here is a second kind that it can't see the first from
+    auto send = reinterpret_cast<void (*)(id, SEL, id)>(objc_msgSend);
+    send(glfwGetCocoaWindow(window_), sel_registerName("toggleFullScreen:"), nullptr);
+#else
+    if (glfwGetWindowMonitor(window_)) {
+        glfwSetWindowMonitor(window_, nullptr, windowedPos_.x, windowedPos_.y,
+                             windowedSize_.x, windowedSize_.y, GLFW_DONT_CARE);
+        return;
     }
-    return false;
+
+    glfwGetWindowPos(window_, &windowedPos_.x, &windowedPos_.y);
+    glfwGetWindowSize(window_, &windowedSize_.x, &windowedSize_.y);
+
+    GLFWmonitor* screen = screenUnder(window_);
+    if (!screen) screen = glfwGetPrimaryMonitor();
+
+#if !defined(_WIN32)
+    // The desktop hasn't changed, so losing focus has nothing to give back. GLFW would minimize
+    // the window all the same, down to 1fps. A full-screen window on Windows is always on top
+    // though, so there it has to get out of the way of whatever you switched to.
+    glfwSetWindowAttrib(window_, GLFW_AUTO_ICONIFY, GLFW_FALSE);
+#endif
+
+    // Asking for the mode it's already in is what stops GLFW changing it
+    const GLFWvidmode* mode = glfwGetVideoMode(screen);
+    glfwSetWindowMonitor(window_, screen, 0, 0, mode->width, mode->height, mode->refreshRate);
+#endif
 }
 
 VkExtent2D Window::extent() const {
