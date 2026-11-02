@@ -276,13 +276,21 @@ void Window::createSwapChain() {
 
 void Window::createSyncObjects() {
     imageAvailableSemaphores_.resize(config_.framesInFlight);
-    renderFinishedSemaphores_.resize(config_.framesInFlight);
     inFlightFences_.resize(config_.framesInFlight);
 
     for (uint32_t i = 0; i < config_.framesInFlight; i++) {
         imageAvailableSemaphores_[i] = std::make_unique<Semaphore>(device_);
-        renderFinishedSemaphores_[i] = std::make_unique<Semaphore>(device_);
         inFlightFences_[i] = std::make_unique<Fence>(device_, true);  // Start signaled
+    }
+    createRenderFinishedSemaphores();
+}
+
+// One per swap chain image, not per frame in flight: a present still waiting on one is only known
+// to be done with it once that image is acquired again, so it can't go round with the frames.
+void Window::createRenderFinishedSemaphores() {
+    renderFinishedSemaphores_.clear();
+    for (uint32_t i = 0; i < swapChain_->imageCount(); i++) {
+        renderFinishedSemaphores_.push_back(std::make_unique<Semaphore>(device_));
     }
 }
 
@@ -302,6 +310,9 @@ void Window::recreateSwapChain() {
 
     // Recreate swap chain
     swapChain_->recreate(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+    if (renderFinishedSemaphores_.size() != swapChain_->imageCount()) {
+        createRenderFinishedSemaphores();
+    }
 
     FINEVK_INFO(LogCategory::Core, "Swap chain recreated: " + std::to_string(width) + "x" + std::to_string(height));
 }
@@ -527,7 +538,7 @@ std::optional<FrameInfo> Window::beginFrame(bool skipFenceWait) {
     info.image = swapChain_->images()[result.imageIndex];
     info.imageView = swapChain_->imageViews()[result.imageIndex]->handle();
     info.imageAvailable = imageAvailable;
-    info.renderFinished = renderFinishedSemaphores_[currentFrameIndex_]->handle();
+    info.renderFinished = renderFinishedSemaphores_[result.imageIndex]->handle();
     info.inFlightFence = inFlightFences_[currentFrameIndex_]->handle();
 
     return info;
@@ -538,7 +549,7 @@ bool Window::endFrame() {
         throw std::runtime_error("Window not bound to a device");
     }
 
-    VkSemaphore renderFinished = renderFinishedSemaphores_[currentFrameIndex_]->handle();
+    VkSemaphore renderFinished = renderFinishedSemaphores_[currentImageIndex_]->handle();
     auto result = swapChain_->present(device_->presentQueue(), currentImageIndex_, renderFinished);
 
     // Advance frame index

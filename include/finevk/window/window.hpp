@@ -407,6 +407,7 @@ private:
     void createSurface();
     void createSwapChain();
     void createSyncObjects();
+    void createRenderFinishedSemaphores();
     void setupCallbacks();
     void cleanup();
     void cleanupSwapChain();
