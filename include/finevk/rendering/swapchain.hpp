@@ -122,6 +122,10 @@ public:
     /// Check if swap chain needs recreation
     bool needsRecreation() const { return needsRecreation_; }
 
+    /// Goes up with each recreate(). A recreate at the same size still replaces every image and
+    /// view, so the extent alone can't say whether what's built on them is still good.
+    uint64_t generation() const { return generation_; }
+
     /// Destructor
     ~SwapChain();
 
@@ -153,6 +157,7 @@ private:
     std::vector<ImageViewPtr> imageViews_;
 
     bool needsRecreation_ = false;
+    uint64_t generation_ = 0;
 };
 
 } // namespace finevk

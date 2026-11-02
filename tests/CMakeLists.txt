@@ -56,5 +56,12 @@ add_executable(test_r1_2
 target_link_libraries(test_r1_2 PRIVATE finevk-core)
 add_test(NAME test_r1_2 COMMAND test_r1_2)
 
+# Swap chain recreated at the same size - needs a display
+add_executable(test_swapchain_recreate
+    test_swapchain_recreate.cpp
+)
+target_link_libraries(test_swapchain_recreate PRIVATE finevk-core)
+add_test(NAME test_swapchain_recreate COMMAND test_swapchain_recreate)
+
 # Copy any required resources
 # (none for Phase 1/2/3/4/5)

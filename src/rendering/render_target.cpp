@@ -394,6 +394,7 @@ void RenderTarget::createFramebuffers() {
     if (window_) {
         auto* swapChain = window_->swapChain();
         const auto& imageViews = swapChain->imageViews();
+        swapChainGeneration_ = swapChain->generation();
 
         for (size_t i = 0; i < imageViews.size(); i++) {
             auto builder = Framebuffer::create(device_, renderPass_.get())
@@ -438,14 +439,15 @@ void RenderTarget::createFramebuffers() {
     }
 }
 
-void RenderTarget::checkResize() {
-    if (!window_) return;
+bool RenderTarget::isStale() const {
+    if (!window_) return false;
 
     auto* swapChain = window_->swapChain();
-    if (!swapChain) return;
+    return swapChain && swapChain->generation() != swapChainGeneration_;
+}
 
-    auto currentExtent = swapChain->extent();
-    if (currentExtent.width != extent_.width || currentExtent.height != extent_.height) {
+void RenderTarget::checkResize() {
+    if (isStale()) {
         recreate();
     }
 }

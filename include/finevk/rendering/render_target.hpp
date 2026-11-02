@@ -153,7 +153,7 @@ public:
      * @brief Recreate resources after resize
      *
      * For window targets, this is called automatically in begin() when
-     * a size mismatch is detected. Can also be called manually.
+     * the swap chain has been recreated. Can also be called manually.
      *
      * @param dq Optional DeletionQueue for frame-safe deferred cleanup.
      *           When provided, old resources are pushed to the queue instead
@@ -161,6 +161,9 @@ public:
      *           recreated (it depends on formats/MSAA, not dimensions).
      */
     void recreate(DeletionQueue* dq = nullptr);
+
+    /// True if the window's swap chain was recreated after these framebuffers were made
+    bool isStale() const;
 
     /// Destructor
     ~RenderTarget();
@@ -199,6 +202,7 @@ private:
 
     // Configuration
     VkExtent2D extent_{};
+    uint64_t swapChainGeneration_ = 0;  // The one the framebuffers were made from
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;

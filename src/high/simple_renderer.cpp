@@ -196,14 +196,9 @@ FrameBeginResult SimpleRenderer::beginFrame(bool skipFenceWait) {
         deletionQueue_->beginFrame(currentFrameInfo_->frameIndex);
     }
 
-    // Check if we need to recreate our resources (size changed)
-    if (renderTarget_) {
-        auto currentExtent = window_->extent();
-        auto targetExtent = renderTarget_->extent();
-        if (targetExtent.width != currentExtent.width ||
-            targetExtent.height != currentExtent.height) {
-            recreateResources();
-        }
+    // Check if we need to recreate our resources (the swap chain changed)
+    if (renderTarget_ && renderTarget_->isStale()) {
+        recreateResources();
     }
 
     // Begin command buffer

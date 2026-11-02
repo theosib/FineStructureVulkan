@@ -403,6 +403,7 @@ void SwapChain::recreate(uint32_t width, uint32_t height) {
     swapChain_ = newSwapChain;
     extent_ = newExtent;
     needsRecreation_ = false;
+    ++generation_;
 
     // Get new images
     uint32_t imageCount;
