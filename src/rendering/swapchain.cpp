@@ -59,7 +59,7 @@ SwapChain::Builder& SwapChain::Builder::vsync(bool enabled) {
     if (enabled) {
         preferredPresentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     } else {
-        preferredPresentMode_ = VK_PRESENT_MODE_MAILBOX_KHR;
+        preferredPresentMode_ = VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
     return *this;
 }
@@ -94,11 +94,14 @@ SwapChainPtr SwapChain::Builder::build() {
 
     // Choose present mode
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR; // Always available
-    for (const auto& mode : support.presentModes) {
-        if (mode == preferredPresentMode_) {
-            presentMode = mode;
-            break;
-        }
+    auto offered = [&support](VkPresentModeKHR wanted) {
+        return std::find(support.presentModes.begin(), support.presentModes.end(), wanted) !=
+               support.presentModes.end();
+    };
+    if (offered(preferredPresentMode_)) {
+        presentMode = preferredPresentMode_;
+    } else if (preferredPresentMode_ == VK_PRESENT_MODE_IMMEDIATE_KHR && offered(VK_PRESENT_MODE_MAILBOX_KHR)) {
+        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
     }
 
     // Choose swap extent

@@ -47,7 +47,8 @@ public:
         /// Set preferred image count (min images in swap chain)
         Builder& imageCount(uint32_t count);
 
-        /// Enable/disable vsync (chooses FIFO vs MAILBOX)
+        /// Enable/disable vsync. Off is IMMEDIATE, or MAILBOX where there's no IMMEDIATE. Metal's
+        /// MAILBOX still waits for a free drawable, so on macOS only IMMEDIATE runs unpaced.
         Builder& vsync(bool enabled);
 
         /// Set old swap chain for recreation
