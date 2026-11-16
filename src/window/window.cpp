@@ -15,11 +15,51 @@
 #define GLFW_EXPOSE_NATIVE_COCOA
 #include <GLFW/glfw3native.h>
 #include <objc/message.h>
+#include <objc/runtime.h>
 #endif
 
 namespace finevk {
 
 namespace {
+
+#if defined(__APPLE__)
+/// True while a window is in macOS's own full screen, a Space of its own
+bool inNativeFullscreen(GLFWwindow* window) {
+    constexpr unsigned long fullScreenMask = 1ul << 14;  // NSWindowStyleMaskFullScreen
+    auto styleMask = reinterpret_cast<unsigned long (*)(id, SEL)>(objc_msgSend);
+    return (styleMask(glfwGetCocoaWindow(window), sel_registerName("styleMask")) & fullScreenMask) != 0;
+}
+
+/// Bring a window out of macOS's own full screen and wait until it's out. A window destroyed
+/// while in it leaves its Space behind, showing the last frame, until the process ends: for
+/// good if the process goes on, or replaces itself with exec. The style mask drops full screen
+/// as the way out starts, so only the notification says it's over. The way out takes a couple
+/// of seconds, the time macOS takes to slide back to the desktop.
+void leaveNativeFullscreen(GLFWwindow* window) {
+    if (!inNativeFullscreen(window)) return;
+    id nsWindow = glfwGetCocoaWindow(window);
+    auto send = reinterpret_cast<id (*)(id, SEL)>(objc_msgSend);
+    auto sendObject = reinterpret_cast<void (*)(id, SEL, id)>(objc_msgSend);
+    auto sendString = reinterpret_cast<id (*)(id, SEL, const char*)>(objc_msgSend);
+    auto observe = reinterpret_cast<id (*)(id, SEL, id, id, id, void (^)(id))>(objc_msgSend);
+
+    id center = send(reinterpret_cast<id>(objc_getClass("NSNotificationCenter")),
+                     sel_registerName("defaultCenter"));
+    id name = sendString(reinterpret_cast<id>(objc_getClass("NSString")),
+                         sel_registerName("stringWithUTF8String:"), "NSWindowDidExitFullScreenNotification");
+    bool out = false;
+    bool* outFlag = &out;
+    id observer = observe(center, sel_registerName("addObserverForName:object:queue:usingBlock:"),
+                          name, nsWindow, nil, ^(id) { *outFlag = true; });
+
+    sendObject(nsWindow, sel_registerName("toggleFullScreen:"), nil);
+    double giveUp = glfwGetTime() + 5.0;
+    while (!out && glfwGetTime() < giveUp) {
+        glfwWaitEventsTimeout(0.05);
+    }
+    sendObject(center, sel_registerName("removeObserver:"), observer);
+}
+#endif
 
 /// The screen under the middle of a window, or null if it's off all of them
 GLFWmonitor* screenUnder(GLFWwindow* window) {
@@ -250,6 +290,12 @@ void Window::cleanup() {
     surface_.reset();
 
     if (window_) {
+        // Leaving full screen below runs the event loop, and what the callbacks would reach
+        // may be gone already: from here on nothing is called back
+        glfwSetWindowUserPointer(window_, nullptr);
+#if defined(__APPLE__)
+        leaveNativeFullscreen(window_);
+#endif
         glfwDestroyWindow(window_);
         window_ = nullptr;
     }
